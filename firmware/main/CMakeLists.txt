@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "hal/st7789.c"
+        "hal/es8311.c"
+        "hal/ttp223.c"
+        "../src/ui/ui_layout.c"
+        "../src/ui/ui_metrics.c"
+        "../src/engine/alert_filter.c"
+        "../src/engine/alert_queue.c"
+        "../src/engine/action_reporter.c"
+        "../src/hal/touch_button.c"
+    INCLUDE_DIRS
+        "."
+        "hal"
+        "../src/include"
+    REQUIRES
+        esp_timer
+        esp_wifi
+        nvs_flash
+        driver
+        mqtt
+)

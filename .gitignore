@@ -32,3 +32,8 @@ ENV/
 *config.json
 credentials.json
 token.json
+
+# Firmware build artifacts
+firmware/build/
+firmware/sim/desk_sprite_sim
+
