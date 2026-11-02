@@ -123,19 +123,72 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            // 绘制基础背景
-            SDL_SetRenderDrawColor(renderer, 24, 24, 28, 255);
+            // 绘制基础背景 (深色网格舞台)
+            SDL_SetRenderDrawColor(renderer, 18, 18, 22, 255);
             SDL_RenderClear(renderer);
 
-            // 顶部状态栏
-            SDL_SetRenderDrawColor(renderer, 40, 40, 48, 255);
+            // 1. 顶部状态栏 (高度 24px)
+            SDL_SetRenderDrawColor(renderer, 32, 34, 42, 255);
             SDL_Rect status_rect = {0, 0, 240, 24};
             SDL_RenderFillRect(renderer, &status_rect);
 
-            // 底部指标看板
-            SDL_SetRenderDrawColor(renderer, 32, 32, 38, 255);
-            SDL_Rect metrics_rect = {0, 168, 240, 72};
-            SDL_RenderFillRect(renderer, &metrics_rect);
+            // 状态指示灯: 绿色代表 Wi-Fi/在线
+            SDL_SetRenderDrawColor(renderer, 52, 211, 153, 255);
+            SDL_Rect dot_rect = {8, 8, 8, 8};
+            SDL_RenderFillRect(renderer, &dot_rect);
+
+            const ui_state_t* st = ui_layout_get_state();
+
+            // 2. 精灵舞台区 (56, 32, 128, 128)
+            if (st && st->alert_active) {
+                // 告警弹出覆盖层
+                if (st->active_alert.priority == PRIORITY_HIGH) {
+                    SDL_SetRenderDrawColor(renderer, 239, 68, 68, 255); // 红色紧急告警
+                } else {
+                    SDL_SetRenderDrawColor(renderer, 245, 158, 11, 255); // 琥珀黄中级告警
+                }
+                SDL_Rect alert_box = {16, 32, 208, 128};
+                SDL_RenderDrawRect(renderer, &alert_box);
+                SDL_Rect alert_inner = {20, 36, 200, 120};
+                SDL_SetRenderDrawColor(renderer, 45, 20, 20, 255);
+                SDL_RenderFillRect(renderer, &alert_inner);
+            } else {
+                // 常态桌宠展示区 (居中 128x128 像素)
+                SDL_SetRenderDrawColor(renderer, 40, 44, 56, 255);
+                SDL_Rect pet_box = {56, 32, 128, 128};
+                SDL_RenderFillRect(renderer, &pet_box);
+                SDL_SetRenderDrawColor(renderer, 99, 102, 241, 255); // 蓝紫色呼吸边框
+                SDL_RenderDrawRect(renderer, &pet_box);
+            }
+
+            // 3. 底部三行度量指标看板 (高度 72px, y: 168~239)
+            SDL_SetRenderDrawColor(renderer, 26, 28, 35, 255);
+            SDL_Rect metrics_bg = {0, 168, 240, 72};
+            SDL_RenderFillRect(renderer, &metrics_bg);
+
+            // Row 1: Kimi (42%)
+            SDL_SetRenderDrawColor(renderer, 48, 52, 65, 255);
+            SDL_Rect r1_track = {12, 172, 216, 14};
+            SDL_RenderFillRect(renderer, &r1_track);
+            SDL_SetRenderDrawColor(renderer, 16, 185, 129, 255); // 绿色进度
+            SDL_Rect r1_bar = {12, 172, 90, 14};
+            SDL_RenderFillRect(renderer, &r1_bar);
+
+            // Row 2: DeepSeek
+            SDL_SetRenderDrawColor(renderer, 48, 52, 65, 255);
+            SDL_Rect r2_track = {12, 196, 216, 14};
+            SDL_RenderFillRect(renderer, &r2_track);
+            SDL_SetRenderDrawColor(renderer, 59, 130, 246, 255); // 蓝色进度
+            SDL_Rect r2_bar = {12, 196, 140, 14};
+            SDL_RenderFillRect(renderer, &r2_bar);
+
+            // Row 3: Copilot
+            SDL_SetRenderDrawColor(renderer, 48, 52, 65, 255);
+            SDL_Rect r3_track = {12, 220, 216, 14};
+            SDL_RenderFillRect(renderer, &r3_track);
+            SDL_SetRenderDrawColor(renderer, 168, 85, 247, 255); // 紫色进度
+            SDL_Rect r3_bar = {12, 220, 170, 14};
+            SDL_RenderFillRect(renderer, &r3_bar);
 
             SDL_RenderPresent(renderer);
         }

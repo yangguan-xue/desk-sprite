@@ -8,6 +8,13 @@ TARGET = desk_sprite_sim
 SDL2_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
 SDL2_LIBS := $(shell pkg-config --libs sdl2 2>/dev/null)
 
+ifeq ($(SDL2_LIBS),)
+ifneq ($(wildcard /opt/homebrew/include/SDL2),)
+SDL2_CFLAGS := -I/opt/homebrew/include -D_THREAD_SAFE
+SDL2_LIBS := -L/opt/homebrew/lib -lSDL2
+endif
+endif
+
 ifneq ($(SDL2_LIBS),)
 CFLAGS += $(SDL2_CFLAGS) -DHAS_SDL2
 LDFLAGS += $(SDL2_LIBS)
