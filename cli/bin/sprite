@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""Desk Sprite CLI 入口脚本 (SPEC-004 第 2 节)"""
+
+import argparse
+import sys
+from pathlib import Path
+
+# 添加工程根目录至 sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from cli.sprite.commands.notify import run_notify
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="sprite", description="Desk Sprite Mac 本地命令行工具")
+    subparsers = parser.add_subparsers(dest="subcommand", help="子命令")
+
+    # 1. notify 子命令
+    notify_parser = subparsers.add_parser("notify", help="向桌宠下发视听通知")
+    notify_parser.add_argument("title", help="通知标题 (1~24 字符)")
+    notify_parser.add_argument("summary", nargs="?", default=None, help="通知摘要 (1~48 字符)")
+    notify_parser.add_argument("-l", "--level", default="medium", help="通知优先级: low | medium | high")
+    notify_parser.add_argument("-s", "--sound", default="ding", help="提示音效: none | ding | chime | cheer | sigh | alert_beep")
+    notify_parser.add_argument("-m", "--mood", default="cheer", help="桌宠动作: idle | coding | meeting | cheer | sigh | alert | sleep")
+    notify_parser.add_argument("-u", "--url", default=None, help="跳转链接")
+    notify_parser.add_argument("-d", "--device", default=None, help="目标设备 ID (如 esp32_c049ef)")
+
+    # 2. run 子命令
+    run_parser = subparsers.add_parser("run", help="执行耗时命令并在结束时视听联动")
+    run_parser.add_argument("command", nargs=argparse.REMAINDER, help="待执行的目标命令 (以 -- 分隔)")
+
+    # 3. state 子命令
+    state_parser = subparsers.add_parser("state", help="工作状态管理")
+    state_sub = state_parser.add_subparsers(dest="state_action", help="状态操作")
+    set_parser = state_sub.add_parser("set", help="手动锁定工作状态 30 分钟")
+    set_parser.add_argument("mode", choices=["idle", "coding", "meeting", "sleep"], help="工作模式")
+    state_sub.add_parser("auto", help="解除手动锁定，恢复自动探测")
+
+    return parser
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if not args.subcommand:
+        parser.print_help()
+        sys.exit(1)
+
+    if args.subcommand == "notify":
+        code = run_notify(
+            title=args.title,
+            summary=args.summary,
+            level=args.level,
+            sound=args.sound,
+            mood=args.mood,
+            url=args.url,
+            device=args.device,
+        )
+        sys.exit(code)
+
+    elif args.subcommand == "run":
+        from cli.sprite.commands.run import run_wrapper
+        cmd = args.command
+        if cmd and cmd[0] == "--":
+            cmd = cmd[1:]
+        if not cmd:
+            sys.stderr.write("Error: No command specified to run. Usage: sprite run -- <command>\n")
+            sys.exit(1)
+        code = run_wrapper(cmd)
+        sys.exit(code)
+
+    elif args.subcommand == "state":
+        from cli.sprite.commands.state import run_state_command
+        code = run_state_command(args.state_action, getattr(args, "mode", None))
+        sys.exit(code)
+
+
+if __name__ == "__main__":
+    main()
