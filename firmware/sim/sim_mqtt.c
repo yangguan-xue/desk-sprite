@@ -8,6 +8,23 @@
 #ifdef HAS_MOSQUITTO
 #include <mosquitto.h>
 static struct mosquitto* g_mosq = NULL;
+static bool g_mqtt_connected = false;
+
+static void on_mosq_connect(struct mosquitto* mosq, void* userdata, int rc) {
+    (void)mosq; (void)userdata;
+    if (rc == 0) {
+        g_mqtt_connected = true;
+        printf("[Sim MQTT] Connected to Broker successfully\n");
+    } else {
+        g_mqtt_connected = false;
+        fprintf(stderr, "[Sim MQTT] Broker rejected connection: rc=%d\n", rc);
+    }
+}
+
+static void on_mosq_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
+    (void)mosq; (void)userdata; (void)rc;
+    g_mqtt_connected = false;
+}
 #endif
 
 static sim_mqtt_config_t g_config;
@@ -118,7 +135,10 @@ void sim_mqtt_handle_message(const char* topic, const char* payload) {
             metrics.ttl_sec = (int)json_get_int64(payload, "ttl_sec", 3600);
             metrics.sampled_at = json_get_int64(payload, "sampled_at", (long long)time(NULL));
 
-            // 解析 data.bars 数组 (R09 核心修复)
+            bool is_mock = (strstr(payload, "\"is_mock\":true") != NULL) ||
+                           (strstr(payload, "\"is_mock\": true") != NULL);
+
+            // 解析 data.bars 数组 (R09, RR08 核心修复)
             const char* bars_pos = strstr(payload, "\"bars\":");
             if (bars_pos) {
                 const char* arr_start = strchr(bars_pos, '[');
@@ -157,6 +177,7 @@ void sim_mqtt_handle_message(const char* topic, const char* payload) {
 
                             item->sampled_at = json_get_int64(obj_buf, "sampled_at", metrics.sampled_at);
                             item->ttl_sec = (int)json_get_int64(obj_buf, "ttl_sec", metrics.ttl_sec);
+                            item->is_mock = is_mock;
 
                             metrics.item_count++;
                         }
@@ -191,10 +212,28 @@ int sim_mqtt_init(const sim_mqtt_config_t* config) {
     g_mosq = mosquitto_new(client_id, true, NULL);
     if (!g_mosq) return -1;
 
-    if (config->username && config->password) {
-        mosquitto_username_pw_set(g_mosq, config->username, config->password);
+    char derived_user[64] = {0};
+    const char* user_ptr = config->username;
+    if ((!user_ptr || user_ptr[0] == '\0') && config->device_id) {
+        snprintf(derived_user, sizeof(derived_user), "dev_%s", config->device_id);
+        user_ptr = derived_user;
+    }
+    const char* pw_ptr = (config->password && config->password[0] != '\0') ? config->password : "device_secret";
+    if (user_ptr && user_ptr[0] != '\0') {
+        mosquitto_username_pw_set(g_mosq, user_ptr, pw_ptr);
     }
 
+    if (config->tls_enabled || config->ca_cert) {
+        const char* ca = config->ca_cert ? config->ca_cert : "cloud/deploy/mosquitto/certs/ca.crt";
+        int tls_rc = mosquitto_tls_set(g_mosq, ca, NULL, NULL, NULL, NULL);
+        if (tls_rc != MOSQ_ERR_SUCCESS) {
+            fprintf(stderr, "[Sim MQTT] TLS setup failed: %s\n", mosquitto_strerror(tls_rc));
+            return -1;
+        }
+    }
+
+    mosquitto_connect_callback_set(g_mosq, on_mosq_connect);
+    mosquitto_disconnect_callback_set(g_mosq, on_mosq_disconnect);
     mosquitto_message_callback_set(g_mosq, on_mosq_message);
 
     int rc = mosquitto_connect(g_mosq, config->broker_host, config->broker_port, 60);
@@ -206,12 +245,20 @@ int sim_mqtt_init(const sim_mqtt_config_t* config) {
     char sub_topic[128];
     snprintf(sub_topic, sizeof(sub_topic), "sprite/device/%s/down/#", config->device_id);
     mosquitto_subscribe(g_mosq, NULL, sub_topic, 1);
-    printf("[Sim MQTT] Subscribed to %s\n", sub_topic);
+    printf("[Sim MQTT] Subscribed to %s (User: %s)\n", sub_topic, user_ptr);
 #else
     printf("[Sim MQTT] Initialized in headless/standalone mode for %s\n",
            config->device_id ? config->device_id : "unknown");
 #endif
     return 0;
+}
+
+bool sim_mqtt_is_connected(void) {
+#ifdef HAS_MOSQUITTO
+    return g_mqtt_connected;
+#else
+    return false;
+#endif
 }
 
 int sim_mqtt_loop(int timeout_ms) {

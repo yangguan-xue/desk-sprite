@@ -78,8 +78,19 @@ def test_boundary_1_cross_device_spoofing():
 # ==========================================
 def test_boundary_2_idempotency_conflict():
     """边界 2: 相同 Idempotency-Key 提交不同内容，返回 HTTP 409 Conflict"""
+    class MockConnectedMQTT:
+        @property
+        def is_connected(self):
+            return True
+        def publish(self, *args, **kwargs):
+            return True
+
     store = EventStore()
-    app = create_app(auth_service=create_test_auth_service(), event_store=store)
+    app = create_app(
+        auth_service=create_test_auth_service(),
+        event_store=store,
+        mqtt_service=MockConnectedMQTT(),
+    )
     client = TestClient(app)
 
     headers = {

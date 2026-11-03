@@ -258,3 +258,64 @@ def test_deduplication_cache_prevents_duplicate_dispatch(store):
     )
     assert res2.status == "duplicate_skipped"
     assert len(dispatched) == 1
+
+
+def test_cross_process_unique_actions_not_dropped(store, tmp_path):
+    """RR02 回归测试: 跨独立 C 进程执行生成的 UUIDv4 具有真实熵，绝不产生重复 action_id 误拦截"""
+    import subprocess
+    c_source = """
+    #include <stdio.h>
+    #include "action_reporter.h"
+    int main(int argc, char** argv) {
+        device_action_t act;
+        action_reporter_build_action("esp32_c049ef", GESTURE_TAP, argv[1], 1005, &act);
+        char buf[512];
+        action_reporter_serialize_json(&act, buf, sizeof(buf));
+        printf("%s", buf);
+        return 0;
+    }
+    """
+    src_file = tmp_path / "probe.c"
+    bin_file = tmp_path / "probe"
+    src_file.write_text(c_source)
+
+    build_cmd = [
+        "gcc", "-Wall", "-Wextra", "-std=c99",
+        "-I", "firmware/src/include",
+        str(src_file),
+        "firmware/src/engine/action_reporter.c",
+        "-o", str(bin_file)
+    ]
+    subprocess.check_call(build_cmd)
+
+    # 预存两个不同的待交互告警
+    store.save(EventRecord(
+        event_id="evt_probe_1",
+        target_device="esp32_c049ef",
+        target_host="macbook_pro",
+        target_url="https://github.com/org/repo/1",
+        is_interactive=True,
+        created_at=1000,
+    ))
+    store.save(EventRecord(
+        event_id="evt_probe_2",
+        target_device="esp32_c049ef",
+        target_host="macbook_pro",
+        target_url="https://github.com/org/repo/2",
+        is_interactive=True,
+        created_at=1000,
+    ))
+
+    dispatched = []
+    router = ActionRouter(event_store=store, mqtt_publisher=lambda t, p, q: dispatched.append(t))
+
+    # 运行两个独立的子进程分别生成交互报文
+    out1 = subprocess.check_output([str(bin_file), "evt_probe_1"])
+    out2 = subprocess.check_output([str(bin_file), "evt_probe_2"])
+
+    res1 = router.handle_device_action("sprite/device/esp32_c049ef/up/action", out1, now=1006)
+    res2 = router.handle_device_action("sprite/device/esp32_c049ef/up/action", out2, now=1007)
+
+    assert res1.status == "command_dispatched"
+    assert res2.status == "command_dispatched"  # RR02: 绝不会因种子固定而命中 duplicate_skipped
+    assert len(dispatched) == 2

@@ -23,12 +23,12 @@ static void test_metrics_fresh_state() {
     payload.items[0].is_mock = false;
     payload.items[0].delta_direction = 1;
 
-    // Item 1: Claude (remaining: 80/100)
-    strncpy(payload.items[1].key, "claude", sizeof(payload.items[1].key));
-    strncpy(payload.items[1].label, "Claude", sizeof(payload.items[1].label));
-    payload.items[1].current = 20.0;
-    payload.items[1].total = 100.0;
-    strncpy(payload.items[1].unit, "%", sizeof(payload.items[1].unit));
+    // Item 1: Copilot (remaining: 18/30 天, 60%, RR07 真实语义)
+    strncpy(payload.items[1].key, "copilot_sub", sizeof(payload.items[1].key));
+    strncpy(payload.items[1].label, "Copilot", sizeof(payload.items[1].label));
+    payload.items[1].current = 18.0;
+    payload.items[1].total = 30.0;
+    strncpy(payload.items[1].unit, "天", sizeof(payload.items[1].unit));
     payload.items[1].direction = METRIC_DIR_REMAINING;
     payload.items[1].status = METRIC_STATUS_NORMAL;
     payload.items[1].is_mock = true;
@@ -50,10 +50,10 @@ static void test_metrics_fresh_state() {
     assert(strstr(model.rows[0].rendered_text, "Kimi: 42/100 kTok") != NULL);
     assert(strstr(model.rows[0].rendered_text, "[STALE]") == NULL);
 
-    // 验证 Item 1 (Remaining: 100 - 20 = 80 -> ratio 0.8)
+    // 验证 Item 1 (Remaining: 18/30 = 0.60 -> ratio 0.60, RR07)
     assert(model.rows[1].style == UI_METRIC_STYLE_FRESH);
     assert(model.rows[1].show_mock_badge);
-    assert(model.rows[1].progress_ratio >= 0.799f && model.rows[1].progress_ratio <= 0.801f);
+    assert(model.rows[1].progress_ratio >= 0.599f && model.rows[1].progress_ratio <= 0.601f);
     assert(strstr(model.rows[1].rendered_text, "[M]") != NULL);
 
     printf("[PASS] test_metrics_fresh_state\n");

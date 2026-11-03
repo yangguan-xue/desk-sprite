@@ -31,14 +31,10 @@ int ui_metrics_compute_render_model(
         dst->show_mock_badge = src->is_mock;
         dst->delta_color = src->delta_direction;
 
-        // 计算进度比例
+        // 计算进度比例 (RR07: 统一 current 与 total 语义，无论是 remaining 还是 used，current/total 均为指标自身比例)
         float ratio = 0.0f;
         if (src->total > 0.00001) {
-            if (src->direction == METRIC_DIR_USED) {
-                ratio = (float)(src->current / src->total);
-            } else {
-                ratio = (float)((src->total - src->current) / src->total);
-            }
+            ratio = (float)(src->current / src->total);
         }
         if (ratio < 0.0f) ratio = 0.0f;
         if (ratio > 1.0f) ratio = 1.0f;

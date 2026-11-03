@@ -91,6 +91,12 @@ class IdempotencyManager:
                 self._cache[key].response = response
                 self._cache[key].created_at = current_time
 
+    def cancel_reservation(self, owner_id: str, idempotency_key: str) -> None:
+        """下发失败时撤回占位预留，允许后续重试 (RR01)"""
+        key = self._make_key(owner_id, idempotency_key)
+        with self._lock:
+            self._cache.pop(key, None)
+
     def cleanup_expired(self, now: Optional[int] = None) -> int:
         current_time = self._now(now)
         with self._lock:

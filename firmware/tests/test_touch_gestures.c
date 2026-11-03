@@ -87,6 +87,12 @@ static void test_action_reporter_payload_serialization() {
     assert(strstr(json_buf, "\"action\":\"long_press\"") != NULL);
     assert(strstr(json_buf, "\"active_alert_id\":null") != NULL);
 
+    // 测试连续生成 UUIDv4 的唯一性 (RR02)
+    device_action_t act2;
+    rc = action_reporter_build_action("esp32_c049ef", GESTURE_TAP, "evt_abc_124", 1700000001, &act2);
+    assert(rc == 0);
+    assert(strcmp(act.action_id, act2.action_id) != 0);
+
     printf("[PASS] test_action_reporter_payload_serialization\n");
 }
 

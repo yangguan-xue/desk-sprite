@@ -3,13 +3,40 @@
 #include <string.h>
 #include <stdint.h>
 
-static void generate_uuid_v4(char* out_uuid) {
-    static uint32_t seed = 0x5a17e001;
-    uint8_t bytes[16];
-    for (int i = 0; i < 16; i++) {
-        seed = seed * 1664525 + 1013904223;
-        bytes[i] = (uint8_t)(seed >> 16);
+#ifdef ESP_PLATFORM
+#include "esp_random.h"
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/time.h>
+#endif
+
+static void get_entropy_bytes(uint8_t* buf, size_t len) {
+#ifdef ESP_PLATFORM
+    esp_fill_random(buf, len);
+#else
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) {
+        ssize_t r = read(fd, buf, len);
+        close(fd);
+        if (r == (ssize_t)len) return;
     }
+    // 回退熵源: 组合微秒时间、PID 与静态计数器 (RR02)
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    static uint32_t counter = 0x83a1b02f;
+    uint32_t seed = (uint32_t)(tv.tv_sec ^ (tv.tv_usec << 12) ^ (getpid() << 16) ^ (++counter));
+    for (size_t i = 0; i < len; i++) {
+        seed = seed * 1664525 + 1013904223;
+        buf[i] = (uint8_t)(seed >> 16);
+    }
+#endif
+}
+
+static void generate_uuid_v4(char* out_uuid) {
+    uint8_t bytes[16];
+    get_entropy_bytes(bytes, sizeof(bytes));
+
     // UUIDv4 规范: 第 7 字节的高 4 位为 0100 (4), 第 9 字节的高 2 位为 10 (variant 1)
     bytes[6] = (bytes[6] & 0x0F) | 0x40;
     bytes[8] = (bytes[8] & 0x3F) | 0x80;

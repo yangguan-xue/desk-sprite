@@ -10,7 +10,7 @@ import socket
 import subprocess
 import tempfile
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import pytest
 import paho.mqtt.client as mqtt
 from starlette.testclient import TestClient
@@ -61,7 +61,7 @@ def real_broker():
         proc.kill()
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def e2e_system(real_broker):
     """构建连接真实 Broker 的端到端系统上下文"""
     broker_host = real_broker["host"]
@@ -106,22 +106,53 @@ def e2e_system(real_broker):
     mqtt_svc.stop()
 
 
-def evaluate_terminal_mode_response(mode: WorkMode, priority_str: str) -> Dict[str, bool]:
-    """模拟终端两阶段模式过滤器与硬件 PA_EN 控制逻辑 (对齐 SPEC-003 与 alert_filter.c)"""
-    # 阶段 1: 入队过滤
-    if mode == WorkMode.SLEEP:
-        if priority_str in ("low", "medium"):
-            return {"accepted": False, "force_mute": False, "screen_wake": False}
-        return {"accepted": True, "force_mute": False, "screen_wake": True}
+def evaluate_terminal_mode_response(mode: WorkMode, priority_str: str) -> Dict[str, Any]:
+    """通过编译并执行真实 C 原生 alert_filter.c 引擎验证决策结果 (RR09)"""
+    import subprocess
+    c_source = """
+    #include <stdio.h>
+    #include <string.h>
+    #include <stdlib.h>
+    #include "alert_filter.h"
 
-    if mode == WorkMode.MEETING:
-        # 会议模式：正常接收弹窗，但必须强制硬件 PA_EN=0 静音
-        if priority_str == "low":
-            return {"accepted": False, "force_mute": True, "screen_wake": False}
-        return {"accepted": True, "force_mute": True, "screen_wake": True}
+    int main(int argc, char** argv) {
+        if (argc < 3) return 1;
+        work_mode_t mode = (work_mode_t)atoi(argv[1]);
+        alert_payload_t alert;
+        memset(&alert, 0, sizeof(alert));
+        if (strcmp(argv[2], "high") == 0) alert.priority = PRIORITY_HIGH;
+        else if (strcmp(argv[2], "medium") == 0) alert.priority = PRIORITY_MEDIUM;
+        else alert.priority = PRIORITY_LOW;
 
-    # CODING 或 IDLE 模式
-    return {"accepted": True, "force_mute": False, "screen_wake": True}
+        alert_ingress_decision_t d = alert_filter_check_ingress(mode, &alert);
+        printf("{\\"decision\\":%d,\\"force_mute\\":%s}\\n",
+               (int)d, alert.force_mute ? "true" : "false");
+        return 0;
+    }
+    """
+    c_file = "/tmp/probe_alert_filter.c"
+    c_bin = "/tmp/probe_alert_filter"
+    with open(c_file, "w") as f:
+        f.write(c_source)
+    subprocess.check_call([
+        "gcc", "-Wall", "-Wextra", "-std=c99",
+        "-I", "firmware/src/include",
+        c_file, "firmware/src/engine/alert_filter.c",
+        "-o", c_bin
+    ])
+    mode_map = {
+        WorkMode.IDLE: 0,
+        WorkMode.CODING: 1,
+        WorkMode.MEETING: 2,
+        WorkMode.SLEEP: 3,
+    }
+    out = subprocess.check_output([c_bin, str(mode_map[mode]), priority_str]).decode("utf-8")
+    res = json.loads(out)
+    return {
+        "accepted": res["decision"] == 2,
+        "force_mute": res["force_mute"],
+        "screen_wake": res["decision"] == 2,
+    }
 
 
 def test_e2e_notification_coding_mode(e2e_system):

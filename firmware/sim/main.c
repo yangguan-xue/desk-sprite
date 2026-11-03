@@ -17,6 +17,37 @@
 
 #ifdef HAS_SDL2
 #include <SDL.h>
+#include "font8x8.h"
+
+static void sim_draw_char(SDL_Renderer* renderer, int x, int y, char c, SDL_Color color, int scale) {
+    if ((uint8_t)c > 127) c = '?';
+    const uint8_t* glyph = font8x8_basic[(uint8_t)c];
+    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
+    for (int row = 0; row < 8; row++) {
+        uint8_t bits = glyph[row];
+        for (int col = 0; col < 8; col++) {
+            if (bits & (1 << col)) {
+                if (scale == 1) {
+                    SDL_RenderDrawPoint(renderer, x + col, y + row);
+                } else {
+                    SDL_Rect pixel = {x + col * scale, y + row * scale, scale, scale};
+                    SDL_RenderFillRect(renderer, &pixel);
+                }
+            }
+        }
+    }
+}
+
+static void sim_draw_string(SDL_Renderer* renderer, int x, int y, const char* str, SDL_Color color, int scale) {
+    if (!str) return;
+    int cur_x = x;
+    while (*str) {
+        if (*str == '\n') break;
+        sim_draw_char(renderer, cur_x, y, *str, color, scale);
+        cur_x += 8 * scale;
+        str++;
+    }
+}
 #endif
 
 static volatile bool g_running = true;
@@ -72,20 +103,40 @@ static void on_state(work_mode_t mode) {
 int main(int argc, char* argv[]) {
     bool headless = false;
     bool run_once = false;
+    bool standalone = false;
+    bool strict_mqtt = false;
+    bool tls_enabled = false;
+
     const char* broker_host = getenv("MQTT_HOST") ? getenv("MQTT_HOST") : "127.0.0.1";
     int broker_port = getenv("MQTT_PORT") ? atoi(getenv("MQTT_PORT")) : 1883;
+    const char* device_id = getenv("DEVICE_ID") ? getenv("DEVICE_ID") : "esp32_c049ef";
+    const char* username = getenv("MQTT_USER");
+    const char* password = getenv("MQTT_PASSWORD");
+    const char* ca_cert = getenv("MQTT_CA_CERT");
+
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--headless") == 0 || strcmp(argv[i], "-h") == 0) {
             headless = true;
-        }
-        if (strcmp(argv[i], "--once") == 0) {
+        } else if (strcmp(argv[i], "--once") == 0) {
             run_once = true;
-        }
-        if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--standalone") == 0) {
+            standalone = true;
+        } else if (strcmp(argv[i], "--strict-mqtt") == 0) {
+            strict_mqtt = true;
+        } else if (strcmp(argv[i], "--tls") == 0) {
+            tls_enabled = true;
+        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             broker_port = atoi(argv[++i]);
-        }
-        if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
+        } else if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
             broker_host = argv[++i];
+        } else if (strcmp(argv[i], "--device") == 0 && i + 1 < argc) {
+            device_id = argv[++i];
+        } else if (strcmp(argv[i], "--user") == 0 && i + 1 < argc) {
+            username = argv[++i];
+        } else if (strcmp(argv[i], "--password") == 0 && i + 1 < argc) {
+            password = argv[++i];
+        } else if (strcmp(argv[i], "--ca") == 0 && i + 1 < argc) {
+            ca_cert = argv[++i];
         }
     }
 
@@ -100,7 +151,7 @@ int main(int argc, char* argv[]) {
     sim_audio_init();
     alert_scheduler_init(&g_alert_sched);
 
-    // 默认初始看板数据
+    // 默认初始看板数据 (Copilot 18/30 60% remaining, RR07)
     memset(&g_last_metrics, 0, sizeof(g_last_metrics));
     g_last_metrics.item_count = 3;
     g_last_metrics.ttl_sec = 3600;
@@ -113,38 +164,56 @@ int main(int argc, char* argv[]) {
     strncpy(g_last_metrics.items[0].unit, "tok", sizeof(g_last_metrics.items[0].unit));
     g_last_metrics.items[0].direction = METRIC_DIR_USED;
     g_last_metrics.items[0].status = METRIC_STATUS_NORMAL;
+    g_last_metrics.items[0].is_mock = false;
 
     strncpy(g_last_metrics.items[1].key, "deepseek_cost", sizeof(g_last_metrics.items[1].key));
-    strncpy(g_last_metrics.items[1].label, "DeepSeek月度", sizeof(g_last_metrics.items[1].label));
+    strncpy(g_last_metrics.items[1].label, "DeepSeek", sizeof(g_last_metrics.items[1].label));
     g_last_metrics.items[1].current = 28.5;
     g_last_metrics.items[1].total = 100.0;
     strncpy(g_last_metrics.items[1].unit, "¥", sizeof(g_last_metrics.items[1].unit));
     g_last_metrics.items[1].direction = METRIC_DIR_USED;
     g_last_metrics.items[1].status = METRIC_STATUS_NORMAL;
+    g_last_metrics.items[1].is_mock = false;
 
     strncpy(g_last_metrics.items[2].key, "copilot_sub", sizeof(g_last_metrics.items[2].key));
-    strncpy(g_last_metrics.items[2].label, "Copilot订阅", sizeof(g_last_metrics.items[2].label));
+    strncpy(g_last_metrics.items[2].label, "Copilot", sizeof(g_last_metrics.items[2].label));
     g_last_metrics.items[2].current = 18.0;
     g_last_metrics.items[2].total = 30.0;
     strncpy(g_last_metrics.items[2].unit, "天", sizeof(g_last_metrics.items[2].unit));
     g_last_metrics.items[2].direction = METRIC_DIR_REMAINING;
     g_last_metrics.items[2].status = METRIC_STATUS_NORMAL;
+    g_last_metrics.items[2].is_mock = true;
 
     ui_metrics_compute_render_model(&g_last_metrics, (long long)time(NULL), &g_metrics_render_model);
     g_has_metrics = true;
 
-    sim_mqtt_config_t mqtt_cfg = {
-        .broker_host = broker_host,
-        .broker_port = broker_port,
-        .device_id = "esp32_c049ef",
-        .username = "sprite_device",
-        .password = "device_secret",
-        .on_alert = on_alert,
-        .on_metrics = on_metrics,
-        .on_state = on_state,
-    };
-    sim_mqtt_init(&mqtt_cfg);
-    sim_mqtt_publish_status("online");
+    if (!standalone) {
+        sim_mqtt_config_t mqtt_cfg = {
+            .broker_host = broker_host,
+            .broker_port = broker_port,
+            .device_id = device_id,
+            .username = username,
+            .password = password,
+            .ca_cert = ca_cert,
+            .tls_enabled = tls_enabled,
+            .on_alert = on_alert,
+            .on_metrics = on_metrics,
+            .on_state = on_state,
+        };
+        int m_rc = sim_mqtt_init(&mqtt_cfg);
+        if (m_rc != 0) {
+            fprintf(stderr, "[Sim Main] Warning: MQTT initialization failed for broker %s:%d\n",
+                    broker_host, broker_port);
+            if (strict_mqtt) {
+                fprintf(stderr, "[Sim Main] Strict MQTT requested, exiting with error code 1\n");
+                return 1;
+            }
+        } else {
+            sim_mqtt_publish_status("online");
+        }
+    } else {
+        printf("[Sim Main] Standalone mode: MQTT disabled\n");
+    }
 
 #ifdef HAS_SDL2
     SDL_Window* window = NULL;
@@ -171,9 +240,13 @@ int main(int argc, char* argv[]) {
 
     int tick_count = 0;
     time_t last_sec = time(NULL);
+    uint32_t mouse_down_time_ms = 0;
+    bool mouse_is_down = false;
 
     while (g_running) {
-        sim_mqtt_loop(50);
+        if (!standalone) {
+            sim_mqtt_loop(50);
+        }
 
         long long now = (long long)time(NULL);
 
@@ -208,19 +281,38 @@ int main(int argc, char* argv[]) {
                 if (event.type == SDL_QUIT) {
                     g_running = false;
                 } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                    // 点击交互: 活跃告警时上报并解除弹窗，主屏时上报普通 tap (R05)
-                    device_action_t act;
-                    memset(&act, 0, sizeof(act));
-                    const char* alert_id = active_alert ? active_alert->event_id : NULL;
+                    mouse_is_down = true;
+                    mouse_down_time_ms = SDL_GetTicks();
+                } else if (event.type == SDL_MOUSEBUTTONUP) {
+                    if (mouse_is_down) {
+                        mouse_is_down = false;
+                        uint32_t duration_ms = SDL_GetTicks() - mouse_down_time_ms;
+                        const char* alert_id = active_alert ? active_alert->event_id : NULL;
 
-                    action_reporter_build_action("esp32_c049ef", GESTURE_TAP, alert_id, now, &act);
-                    sim_mqtt_publish_action(&act);
+                        if (duration_ms < 500) {
+                            // GESTURE_TAP (单击, RR04)
+                            printf("[Sim Input] GESTURE_TAP detected (%u ms)\n", duration_ms);
+                            device_action_t act;
+                            action_reporter_build_action(device_id, GESTURE_TAP, alert_id, now, &act);
+                            if (!standalone) sim_mqtt_publish_action(&act);
 
-                    if (active_alert) {
-                        printf("[Sim Input] Active alert %s dismissed via Tap\n", alert_id);
-                        alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
-                    } else {
-                        printf("[Sim Input] Screen tapped in dashboard mode\n");
+                            if (active_alert) {
+                                printf("[Sim Input] Active alert %s interacted & dismissed via Tap\n", alert_id);
+                                alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
+                            } else {
+                                printf("[Sim Input] Dashboard tapped: toggle unit display\n");
+                            }
+                        } else if (duration_ms >= 1500) {
+                            // GESTURE_LONG_PRESS (长按, RR04)
+                            printf("[Sim Input] GESTURE_LONG_PRESS detected (%u ms)\n", duration_ms);
+                            if (active_alert) {
+                                // 静默消除告警: 规范要求严禁向云端上报 open_url 动作报文
+                                printf("[Sim Input] Active alert %s silently dismissed via Long Press (no action sent)\n", alert_id);
+                                alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
+                            } else {
+                                printf("[Sim Input] Dashboard long press: temporary mute 30 min\n");
+                            }
+                        }
                     }
                 }
             }
@@ -239,29 +331,54 @@ int main(int argc, char* argv[]) {
             SDL_Rect wifi_dot = {8, 8, 8, 8};
             SDL_RenderFillRect(renderer, &wifi_dot);
 
-            // 模式指示灯: IDLE 绿, CODING 蓝, MEETING 黄, SLEEP 灰
+            // 模式指示灯与文字: IDLE 绿, CODING 蓝, MEETING 黄, SLEEP 灰 (RR08)
+            const char* mode_tag = "IDLE";
             if (g_current_mode == WORK_MODE_CODING) {
                 SDL_SetRenderDrawColor(renderer, 59, 130, 246, 255);
+                mode_tag = "CODING";
             } else if (g_current_mode == WORK_MODE_MEETING) {
                 SDL_SetRenderDrawColor(renderer, 245, 158, 11, 255);
+                mode_tag = "MEETING";
             } else if (g_current_mode == WORK_MODE_SLEEP) {
                 SDL_SetRenderDrawColor(renderer, 107, 114, 128, 255);
+                mode_tag = "SLEEP";
             } else {
                 SDL_SetRenderDrawColor(renderer, 16, 185, 129, 255);
+                mode_tag = "IDLE";
             }
             SDL_Rect mode_dot = {22, 8, 8, 8};
             SDL_RenderFillRect(renderer, &mode_dot);
 
+            SDL_Color white_color = {255, 255, 255, 255};
+            SDL_Color gray_color = {156, 163, 175, 255};
+            sim_draw_string(renderer, 36, 8, mode_tag, gray_color, 1);
+
             // 2. 舞台区域 (y: 24~167)
             if (active_alert) {
-                // 告警弹窗覆盖层
+                // 告警弹窗覆盖层 (RR08: 实际渲染可读文本、倒计时与优先级)
                 if (active_alert->priority == PRIORITY_HIGH) {
-                    SDL_SetRenderDrawColor(renderer, 220, 38, 38, 255); // 红色
+                    SDL_SetRenderDrawColor(renderer, 185, 28, 28, 255); // 深红
                 } else {
-                    SDL_SetRenderDrawColor(renderer, 217, 119, 6, 255); // 橙色
+                    SDL_SetRenderDrawColor(renderer, 180, 83, 9, 255); // 深橙
                 }
-                SDL_Rect alert_box = {16, 32, 208, 128};
+                SDL_Rect alert_box = {12, 30, 216, 132};
                 SDL_RenderFillRect(renderer, &alert_box);
+
+                // 绘制标题
+                sim_draw_string(renderer, 20, 38, active_alert->title, white_color, 1);
+
+                // 绘制摘要 (最多两行)
+                sim_draw_string(renderer, 20, 54, active_alert->summary, white_color, 1);
+
+                // 绘制倒计时
+                char cd_buf[32];
+                int left_sec = (int)(active_alert->expire_at - now);
+                if (left_sec < 0) left_sec = 0;
+                snprintf(cd_buf, sizeof(cd_buf), "Expires: %ds", left_sec);
+                sim_draw_string(renderer, 20, 78, cd_buf, gray_color, 1);
+
+                // 交互提示栏
+                sim_draw_string(renderer, 20, 142, "Tap:Open | Hold:Dismiss", white_color, 1);
             } else {
                 // 正常桌宠动画区
                 SDL_SetRenderDrawColor(renderer, 30, 32, 42, 255);
@@ -269,37 +386,41 @@ int main(int argc, char* argv[]) {
                 SDL_RenderFillRect(renderer, &pet_box);
                 SDL_SetRenderDrawColor(renderer, 99, 102, 241, 255);
                 SDL_RenderDrawRect(renderer, &pet_box);
+                sim_draw_string(renderer, 90, 88, "( ^_^ )", white_color, 1);
             }
 
-            // 3. 底部三行度量指标看板 (y: 168~239, R09 动态与 Stale 渲染)
+            // 3. 底部三行度量指标看板 (y: 168~239, RR07, RR08 完整文本、比例与 [M]/[STALE] 标记)
             SDL_SetRenderDrawColor(renderer, 26, 28, 35, 255);
             SDL_Rect metrics_bg = {0, 168, 240, 72};
             SDL_RenderFillRect(renderer, &metrics_bg);
 
             for (int i = 0; i < 3; i++) {
-                int y_pos = 172 + i * 24;
+                int y_pos = 172 + i * 23;
                 SDL_SetRenderDrawColor(renderer, 48, 52, 65, 255);
-                SDL_Rect r_track = {12, y_pos, 216, 14};
+                SDL_Rect r_track = {10, y_pos, 220, 18};
                 SDL_RenderFillRect(renderer, &r_track);
 
                 if (i < g_metrics_render_model.count) {
                     const ui_metric_row_render_t* row = &g_metrics_render_model.rows[i];
-                    int bar_w = (int)(row->progress_ratio * 216.0f);
-                    if (bar_w > 216) bar_w = 216;
+                    int bar_w = (int)(row->progress_ratio * 220.0f);
+                    if (bar_w > 220) bar_w = 220;
                     if (bar_w < 0) bar_w = 0;
 
                     if (row->style == UI_METRIC_STYLE_STALE) {
-                        // Stale 灰显 (R09)
-                        SDL_SetRenderDrawColor(renderer, 107, 114, 128, 255);
+                        SDL_SetRenderDrawColor(renderer, 107, 114, 128, 180); // Stale 灰显
                     } else if (i == 0) {
-                        SDL_SetRenderDrawColor(renderer, 16, 185, 129, 255);
+                        SDL_SetRenderDrawColor(renderer, 16, 185, 129, 200); // 绿色
                     } else if (i == 1) {
-                        SDL_SetRenderDrawColor(renderer, 59, 130, 246, 255);
+                        SDL_SetRenderDrawColor(renderer, 59, 130, 246, 200); // 蓝色
                     } else {
-                        SDL_SetRenderDrawColor(renderer, 168, 85, 247, 255);
+                        SDL_SetRenderDrawColor(renderer, 168, 85, 247, 200); // 紫色
                     }
-                    SDL_Rect r_bar = {12, y_pos, bar_w, 14};
+                    SDL_Rect r_bar = {10, y_pos, bar_w, 18};
                     SDL_RenderFillRect(renderer, &r_bar);
+
+                    // 绘制指标文本 (RR08)
+                    SDL_Color text_col = (row->style == UI_METRIC_STYLE_STALE) ? gray_color : white_color;
+                    sim_draw_string(renderer, 14, y_pos + 5, row->rendered_text, text_col, 1);
                 }
             }
 
@@ -315,8 +436,10 @@ int main(int argc, char* argv[]) {
     }
 
     printf("Exiting simulator...\n");
-    sim_mqtt_publish_status("offline");
-    sim_mqtt_destroy();
+    if (!standalone) {
+        sim_mqtt_publish_status("offline");
+        sim_mqtt_destroy();
+    }
 
 #ifdef HAS_SDL2
     if (renderer) SDL_DestroyRenderer(renderer);

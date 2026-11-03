@@ -92,8 +92,10 @@ def test_e2e_action_to_browser_flow(real_broker):
     cloud_mqtt.action_router = action_router
     cloud_mqtt.start()
 
-    # 2. 启动 Mac 宿主端模拟客户端 (订阅 host_command)
-    received_host_commands: List[Dict] = []
+    # 2. 启动真实的 Mac 宿主端 DaemonMQTTWorker (RR09 真实组件)
+    from cli.sprite.config import SpriteConfig
+    from cli.sprite.daemon.mqtt_worker import DaemonMQTTWorker
+
     opened_urls: List[str] = []
 
     def mock_system_opener(url: str) -> bool:
@@ -105,71 +107,91 @@ def test_e2e_action_to_browser_flow(real_broker):
         system_opener=mock_system_opener,
         time_provider=lambda: now,
     )
+    daemon_config = SpriteConfig(
+        host_id="macbook_pro",
+        target_device_id="esp32_c049ef",
+        mqtt_broker=broker_host,
+        mqtt_port=broker_port,
+    )
+    daemon_worker = DaemonMQTTWorker(config=daemon_config, executor=executor)
+    daemon_worker.start()
 
-    host_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="macbook_pro_daemon")
-    def on_host_message(c, u, msg):
+    # 启动 ACK 监控客户端，验证真实回执通道与序列化 (RR09)
+    received_acks: List[Dict] = []
+    ack_monitor = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="ack_monitor")
+
+    def on_ack_message(c, u, msg):
         try:
             payload = json.loads(msg.payload.decode("utf-8"))
-            received_host_commands.append(payload)
-            # 真实由 CommandExecutor 执行
-            ack = executor.execute(payload, now=now)
-            # 回执 ACK 到 Broker
-            c.publish("sprite/host/macbook_pro/up/status", json.dumps(ack), qos=1)
-        except Exception:
-            pass
+            received_acks.append(payload)
+        except Exception as e:
+            pytest.fail(f"ACK payload JSON decode failed: {e}")
 
-    host_client.on_message = on_host_message
-    host_client.connect(broker_host, broker_port, 60)
-    host_client.subscribe("sprite/host/macbook_pro/down/command")
-    host_client.loop_start()
+    ack_monitor.on_message = on_ack_message
+    ack_monitor.connect(broker_host, broker_port, 60)
+    ack_monitor.subscribe("sprite/host/macbook_pro/up/ack")
+    ack_monitor.loop_start()
 
-    # 3. 模拟物理设备端通过网络向 Broker 发起 device_action
-    device_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="esp32_c049ef_sim")
+    # 3. 通过真实的 C action_reporter 生成动作报文 (RR02, RR05, RR09)
+    c_source = f"""
+    #include <stdio.h>
+    #include "action_reporter.h"
+    int main(void) {{
+        device_action_t act;
+        action_reporter_build_action("esp32_c049ef", GESTURE_TAP, "evt_ci_success_42", {now}, &act);
+        char buf[512];
+        action_reporter_serialize_json(&act, buf, sizeof(buf));
+        printf("%s", buf);
+        return 0;
+    }}
+    """
+    c_file = "/tmp/probe_action_reporter.c"
+    c_bin = "/tmp/probe_action_reporter"
+    with open(c_file, "w") as f:
+        f.write(c_source)
+    subprocess.check_call([
+        "gcc", "-Wall", "-Wextra", "-std=c99",
+        "-I", "firmware/src/include",
+        c_file, "firmware/src/engine/action_reporter.c",
+        "-o", c_bin
+    ])
+    c_action_json = subprocess.check_output([c_bin]).decode("utf-8")
+    device_action_payload = json.loads(c_action_json)
+    action_uuid = device_action_payload["action_id"]
+
+    # 启动设备 MQTT 客户端并发布真实 C 动作报文
+    device_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="cid_device_esp32_c049ef")
     device_client.connect(broker_host, broker_port, 60)
     device_client.loop_start()
 
     # 等待所有 MQTT 客户端网络连接建立完成
     for _ in range(50):
-        if cloud_mqtt.is_connected and host_client.is_connected() and device_client.is_connected():
+        if cloud_mqtt.is_connected and daemon_worker.client.is_connected() and device_client.is_connected() and ack_monitor.is_connected():
             break
         time.sleep(0.05)
 
-    action_uuid = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
-    device_action_payload = {
-        "type": "device_action",
-        "version": 1,
-        "action_id": action_uuid,
-        "device_id": "esp32_c049ef",
-        "created_at": now,
-        "expire_at": now + 10,
-        "data": {
-            "action": "tap",
-            "active_alert_id": "evt_ci_success_42",
-        },
-    }
-
-    # 发布动作报文到 Broker
+    # 发布由真实 C 编译输出的动作报文到 Broker
     device_client.publish(
         "sprite/device/esp32_c049ef/up/action",
-        json.dumps(device_action_payload),
+        c_action_json,
         qos=1,
     )
 
     # 4. 等待 Mac 宿主端收到下发指令并完成打开
     for _ in range(50):
-        if len(opened_urls) >= 1:
+        if len(opened_urls) >= 1 and len(received_acks) >= 1:
             break
         time.sleep(0.05)
 
     assert len(opened_urls) == 1, "Failed to execute open_url through real broker flow"
     assert opened_urls[0] == "https://github.com/yangguan-xue/desk-sprite/pull/42"
 
-    # 5. 验证 host_command 字段与状态流转
-    assert len(received_host_commands) == 1
-    cmd = received_host_commands[0]
-    assert cmd["type"] == "host_command"
-    assert cmd["action"] == "open_browser"
-    assert cmd["source_action_id"] == action_uuid
+    # 5. 验证宿主回执 ACK (RR09: 真实 ACK 上报至 up/ack，杜绝序列化异常)
+    assert len(received_acks) == 1
+    ack = received_acks[0]
+    assert ack["type"] == "command_ack"
+    assert ack["status"] == "success"
+    assert ack["host_id"] == "macbook_pro"
 
     # 6. 验证云端事件已被标记为 CONSUMED
     rec = event_store.get("evt_ci_success_42", now=now)
@@ -178,6 +200,7 @@ def test_e2e_action_to_browser_flow(real_broker):
     # 清理网络连接
     device_client.loop_stop()
     device_client.disconnect()
-    host_client.loop_stop()
-    host_client.disconnect()
+    ack_monitor.loop_stop()
+    ack_monitor.disconnect()
+    daemon_worker.stop()
     cloud_mqtt.stop()

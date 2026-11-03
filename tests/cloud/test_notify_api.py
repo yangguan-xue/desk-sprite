@@ -22,11 +22,35 @@ from cloud.app.services.event_store import EventStore
 from cloud.app.services.idempotency import IdempotencyManager
 
 
+class MockConnectedMQTT:
+    def __init__(self, connected: bool = True):
+        self._connected = connected
+        self.published = []
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def set_connected(self, val: bool) -> None:
+        self._connected = val
+
+    def publish(self, topic: str, payload: str, qos: int = 1, retain: bool = False) -> bool:
+        if not self._connected:
+            return False
+        self.published.append((topic, payload, qos, retain))
+        return True
+
+
 @pytest.fixture
-def client():
-    # 显式注入测试注册表，不污染默认无配置应用
+def mock_mqtt():
+    return MockConnectedMQTT(connected=True)
+
+
+@pytest.fixture
+def client(mock_mqtt):
+    # 显式注入测试注册表与已连接 Mock MQTT (RR01)
     auth = create_test_auth_service()
-    app = create_app(auth_service=auth)
+    app = create_app(auth_service=auth, mqtt_service=mock_mqtt)
     return TestClient(app)
 
 
@@ -214,3 +238,46 @@ def test_notify_malformed_url_422(client):
     )
     assert response.status_code == 422
     assert response.json()["code"] == 42201
+
+
+def test_notify_disconnected_mqtt_returns_503_and_allows_retry(mock_mqtt):
+    """RR01 回归测试: MQTT 离线或投递失败必须返回 503 且不得污染幂等缓存，重试恢复后成功"""
+    auth = create_test_auth_service()
+    mock_mqtt.set_connected(False)
+    app = create_app(auth_service=auth, mqtt_service=mock_mqtt)
+    c = TestClient(app)
+
+    payload = {
+        "target_device": "esp32_c049ef",
+        "priority": "medium",
+        "title": "测试断线",
+        "summary": "MQTT不可用",
+    }
+    headers = {
+        "Authorization": "Bearer spr_live_test_key",
+        "Idempotency-Key": "idemp_retry_key_001",
+    }
+
+    # 1. 尝试下发，MQTT 断开返回 503
+    resp = c.post("/api/v1/notify", json=payload, headers=headers)
+    assert resp.status_code == 503
+    data = resp.json()
+    assert data["code"] == 50301
+    assert data["data"]["retryable"] is True
+
+    # 验证此时 idempotency manager 未缓存 200 成功，且已撤销占位预留
+    key = app.state.idempotency_manager._make_key("user_1001", "idemp_retry_key_001")
+    assert key not in app.state.idempotency_manager._cache
+
+    # 2. Broker 恢复连接，重试相同幂等键成功投递并返回 200
+    mock_mqtt.set_connected(True)
+    resp2 = c.post("/api/v1/notify", json=payload, headers=headers)
+    assert resp2.status_code == 200
+    assert resp2.json()["code"] == 0
+    assert len(mock_mqtt.published) == 1
+
+    # 再次重试相同幂等键: 命中缓存成功
+    resp3 = c.post("/api/v1/notify", json=payload, headers=headers)
+    assert resp3.status_code == 200
+    assert resp3.json()["data"]["event_id"] == resp2.json()["data"]["event_id"]
+    assert len(mock_mqtt.published) == 1  # 未重复发送

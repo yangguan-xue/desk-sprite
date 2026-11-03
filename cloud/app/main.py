@@ -30,8 +30,8 @@ async def lifespan(app: FastAPI):
     lifecycle_monitor: LifecycleMonitor = app.state.lifecycle_monitor
     metrics_engine: MetricsEngine = app.state.metrics_engine
 
-    # 启动真实 MQTT 网络连接 (若环境未禁用)
-    auto_connect = os.getenv("MQTT_AUTO_CONNECT", "false").lower() in ("true", "1", "yes")
+    # 启动真实 MQTT 网络连接 (默认开启自动连接与后台重连守护，RR01)
+    auto_connect = os.getenv("MQTT_AUTO_CONNECT", "true").lower() in ("true", "1", "yes")
     background_tasks = []
 
     if auto_connect:

@@ -4,6 +4,7 @@ import logging
 import os
 import ssl
 import threading
+import time
 import uuid
 from typing import Callable, List, Optional
 
@@ -97,15 +98,39 @@ class MQTTService:
             logger.error("Error dispatching message on %s: %s", msg.topic, e, exc_info=True)
 
     def start(self) -> None:
-        """启动真实 MQTT 网络循环"""
+        """启动真实 MQTT 网络循环与后台断线重连守护 (RR01)"""
         if self._client is None:
             self.init_client()
         self._running = True
+        self._client.reconnect_delay_set(min_delay=1, max_delay=30)
+
         try:
             self._client.connect(self.host, self.port, keepalive=60)
             self._client.loop_start()
         except Exception as e:
-            logger.warning("Could not connect to MQTT Broker on %s:%d: %s", self.host, self.port, e)
+            logger.warning(
+                "Could not connect immediately to MQTT Broker on %s:%d: %s. Background watchdog will retry.",
+                self.host,
+                self.port,
+                e,
+            )
+            try:
+                self._client.loop_start()
+            except Exception:
+                pass
+
+            def _watchdog():
+                while self._running and not self._connected:
+                    time.sleep(1.0)
+                    if self._running and not self._connected and self._client:
+                        try:
+                            self._client.connect(self.host, self.port, keepalive=60)
+                            break
+                        except Exception:
+                            pass
+
+            self._reconnect_thread = threading.Thread(target=_watchdog, daemon=True)
+            self._reconnect_thread.start()
 
     def stop(self) -> None:
         """优雅关闭 MQTT 网络循环"""
@@ -118,16 +143,22 @@ class MQTTService:
                 pass
             self._connected = False
 
-    def publish(self, topic: str, payload: str, qos: int = 1, retain: bool = False) -> None:
-        """向 MQTT Broker 发布消息"""
+    def publish(self, topic: str, payload: str, qos: int = 1, retain: bool = False) -> bool:
+        """向 MQTT Broker 发布消息，返回是否实际成功提交网络层 (RR01)"""
         record = {"topic": topic, "payload": payload, "qos": qos, "retain": retain}
         with self._lock:
             self._published_messages.append(record)
 
         if self._client and self._connected:
-            self._client.publish(topic, payload=payload, qos=qos, retain=retain)
+            try:
+                info = self._client.publish(topic, payload=payload, qos=qos, retain=retain)
+                return info.rc == mqtt.MQTT_ERR_SUCCESS
+            except Exception as e:
+                logger.error("Exception during MQTT publish to %s: %s", topic, e)
+                return False
         else:
-            logger.debug("MQTT client not connected, message recorded in-memory for %s", topic)
+            logger.warning("MQTT client not connected, message rejected for %s", topic)
+            return False
 
     def dispatch_message(self, topic: str, payload_bytes: bytes) -> None:
         """处理来自 Broker 的订阅消息 (R03 核心路由入口)"""

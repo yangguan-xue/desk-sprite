@@ -142,11 +142,34 @@ async def notify(
         ),
     )
 
-    if mqtt_service:
-        topic = f"sprite/device/{req_data.target_device}/down/alert"
-        mqtt_service.publish(topic, alert_payload.model_dump_json(), qos=1)
+    # 6. 下发到 MQTT Broker (RR01 强投递语义与可重试错误)
+    if not mqtt_service or not mqtt_service.is_connected:
+        if idempotency_key:
+            idempotency_manager.cancel_reservation(profile.owner_id, idempotency_key)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": 50301,
+                "message": "MQTT delivery failed: broker not connected",
+                "data": {"retryable": True},
+            },
+        )
 
-    # 7. 组装标准响应
+    topic = f"sprite/device/{req_data.target_device}/down/alert"
+    delivered = mqtt_service.publish(topic, alert_payload.model_dump_json(), qos=1)
+    if not delivered:
+        if idempotency_key:
+            idempotency_manager.cancel_reservation(profile.owner_id, idempotency_key)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": 50301,
+                "message": "MQTT delivery failed: publish rejected",
+                "data": {"retryable": True},
+            },
+        )
+
+    # 7. 组装标准响应 (仅当投递成功才缓存幂等结果)
     resp_content = {
         "code": 0,
         "message": "success",
