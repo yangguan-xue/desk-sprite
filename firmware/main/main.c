@@ -12,7 +12,9 @@
 #include "esp_event.h"
 #include "esp_netif.h"
 #include "esp_sntp.h"
+#include "esp_crt_bundle.h"
 #include "mqtt_client.h"
+#include "mqtt_reassembler.h"
 #include "cJSON.h"
 
 #include "st7789.h"
@@ -25,6 +27,7 @@
 #include "alert_queue.h"
 #include "touch_button.h"
 #include "action_reporter.h"
+#include "touch_action.h"
 #include "font_utf8.h"
 
 static const char *TAG = "SPRITE_MAIN";
@@ -77,11 +80,13 @@ static metrics_payload_t s_last_metrics;
 static ui_metrics_render_model_t s_metrics_model;
 static bool s_has_metrics = false;
 static char s_last_played_event_id[64] = {0};
+static mqtt_reassembler_t s_mqtt_reassembler;
 
 // 前向声明
 static void wifi_init_sta(void);
 static void mqtt_app_start(void);
 static void sync_time_via_sntp(void);
+static bool is_time_synced(void) __attribute__((unused));
 
 // ============================================================================
 // JSON 报文解析辅助函数 (R4-02: 有界解析 SPEC-002 下行告警、指标与状态)
@@ -333,6 +338,14 @@ static void sync_time_via_sntp(void) {
     }
 }
 
+static bool __attribute__((unused)) is_time_synced(void) {
+    time_t now = time(NULL);
+    if (now < 1700000000LL) {
+        return false;
+    }
+    return (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED);
+}
+
 static void wifi_init_sta(void) {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -392,34 +405,52 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         }
         case MQTT_EVENT_DISCONNECTED:
             s_mqtt_connected = false;
+            mqtt_reassembler_reset(&s_mqtt_reassembler);
             ESP_LOGW(TAG, "MQTT Disconnected");
             break;
         case MQTT_EVENT_DATA: {
-            // 安全拷贝 topic
-            char topic[128] = {0};
-            int tlen = event->topic_len < (int)sizeof(topic) - 1 ? event->topic_len : (int)sizeof(topic) - 1;
-            memcpy(topic, event->topic, tlen);
-            topic[tlen] = '\0';
+            const char *full_topic = NULL;
+            const char *full_payload = NULL;
+            int full_payload_len = 0;
 
-            // 安全有界拷贝 payload，防止分片溢出与未以 NUL 结尾造成的跨边界访问 (R4-02)
-            int dlen = event->data_len < 2047 ? event->data_len : 2047;
-            char payload[2048];
-            memcpy(payload, event->data, dlen);
-            payload[dlen] = '\0';
+            // 基于报文声明总长度进行有界重组，支持 ESP-MQTT 跨包分片报文 (R5-02)
+            mqtt_reassemble_result_t res = mqtt_reassembler_feed(
+                &s_mqtt_reassembler,
+                event->topic,
+                event->topic_len,
+                event->data,
+                event->data_len,
+                event->total_data_len,
+                event->current_data_offset,
+                &full_topic,
+                &full_payload,
+                &full_payload_len
+            );
 
-            if (strstr(topic, "/down/alert")) {
-                ESP_LOGI(TAG, "Received down/alert payload (%d bytes)", dlen);
+            if (res == MQTT_REASSEMBLE_NEED_MORE) {
+                ESP_LOGD(TAG, "MQTT fragmented payload chunk received: offset=%d len=%d total=%d",
+                         event->current_data_offset, event->data_len, event->total_data_len);
+                break;
+            } else if (res != MQTT_REASSEMBLE_COMPLETE) {
+                ESP_LOGW(TAG, "MQTT payload reassembly rejected: res=%d, offset=%d, len=%d, total=%d",
+                         res, event->current_data_offset, event->data_len, event->total_data_len);
+                break;
+            }
+
+            // 完整数据包已拼装完毕，执行真实下行业务解析
+            if (strstr(full_topic, "/down/alert")) {
+                ESP_LOGI(TAG, "Received complete down/alert payload (%d bytes)", full_payload_len);
                 alert_payload_t alert;
-                parse_down_alert(payload, &alert);
+                parse_down_alert(full_payload, &alert);
                 if (alert.event_id[0] != '\0') {
                     int admitted = alert_scheduler_push(&s_alert_sched, &alert, s_current_mode);
                     ESP_LOGI(TAG, "Alert %s (prio=%d, dur=%ds) admitted to scheduler (res=%d)",
                              alert.event_id, alert.priority, alert.duration_sec, admitted);
                 }
-            } else if (strstr(topic, "/down/metrics")) {
-                ESP_LOGI(TAG, "Received down/metrics payload (%d bytes)", dlen);
+            } else if (strstr(full_topic, "/down/metrics")) {
+                ESP_LOGI(TAG, "Received complete down/metrics payload (%d bytes)", full_payload_len);
                 metrics_payload_t metrics;
-                parse_down_metrics(payload, &metrics);
+                parse_down_metrics(full_payload, &metrics);
                 if (metrics.item_count > 0) {
                     s_last_metrics = metrics;
                     s_has_metrics = true;
@@ -427,16 +458,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
                     ui_metrics_compute_render_model_ex(&s_last_metrics, (long long)now_sec, s_metric_view_mode, &s_metrics_model);
                     ESP_LOGI(TAG, "Updated metrics model with %d bars", metrics.item_count);
                 }
-            } else if (strstr(topic, "/down/state")) {
-                ESP_LOGI(TAG, "Received down/state payload: %s", payload);
+            } else if (strstr(full_topic, "/down/state")) {
+                ESP_LOGI(TAG, "Received complete down/state payload: %s", full_payload);
                 work_mode_t new_mode = s_current_mode;
-                parse_down_state(payload, &new_mode);
+                parse_down_state(full_payload, &new_mode);
                 if (new_mode == WORK_MODE_SLEEP && s_current_mode != WORK_MODE_SLEEP) {
                     alert_scheduler_clear_medium(&s_alert_sched);
                 }
                 s_current_mode = new_mode;
                 ESP_LOGI(TAG, "Updated work mode: %d", (int)s_current_mode);
-            } else if (strstr(topic, "/down/dismiss")) {
+            } else if (strstr(full_topic, "/down/dismiss")) {
                 time_t now_sec = time(NULL);
                 alert_scheduler_dismiss(&s_alert_sched, (long long)now_sec, s_current_mode);
                 ESP_LOGI(TAG, "Alert dismissed via MQTT");
@@ -464,7 +495,33 @@ static void mqtt_app_start(void) {
         .session.keepalive = 60,
         .network.reconnect_timeout_ms = 2000,
         .network.disable_auto_reconnect = false,
+        .buffer.size = 2048,
     };
+
+#ifdef CONFIG_SPRITE_MQTT_CA_CERT
+    if (strlen(CONFIG_SPRITE_MQTT_CA_CERT) > 0) {
+        mqtt_cfg.broker.verification.certificate = CONFIG_SPRITE_MQTT_CA_CERT;
+        mqtt_cfg.broker.verification.certificate_len = strlen(CONFIG_SPRITE_MQTT_CA_CERT) + 1;
+        ESP_LOGI(TAG, "Configured custom CA certificate for MQTT TLS verification");
+    } else {
+#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+        mqtt_cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+        ESP_LOGI(TAG, "Attached ESP x509 certificate bundle for MQTT TLS verification");
+#endif
+    }
+#elif CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
+    mqtt_cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+    ESP_LOGI(TAG, "Attached ESP x509 certificate bundle for MQTT TLS verification");
+#endif
+
+#ifdef CONFIG_SPRITE_MQTT_BROKER_COMMON_NAME
+    if (strlen(CONFIG_SPRITE_MQTT_BROKER_COMMON_NAME) > 0) {
+        mqtt_cfg.broker.verification.common_name = CONFIG_SPRITE_MQTT_BROKER_COMMON_NAME;
+    }
+#endif
+
+    // 严禁关闭服务端验证，严格校验主机名与证书有效性 (R5-01)
+    mqtt_cfg.broker.verification.skip_cert_common_name_check = false;
 
     if (strlen(CONFIG_SPRITE_MQTT_USERNAME) > 0) {
         mqtt_cfg.credentials.username = CONFIG_SPRITE_MQTT_USERNAME;
@@ -495,34 +552,35 @@ static void touch_poll_task(void *pvParameters) {
 
         if (gesture == GESTURE_TAP) {
             ESP_LOGI(TAG, "[Touch] GESTURE_TAP detected");
+            const alert_payload_t* active = alert_scheduler_get_active(&s_alert_sched);
             if (active) {
-                // 协议时间使用已同步的真实 Unix 时间戳 (R4-03)
+                // 协议动作受时钟同步与网络在线状态强约束 (R5-04)
                 time_t unix_now = time(NULL);
-                if (unix_now < 1700000000) {
-                    ESP_LOGW(TAG, "SNTP clock not synced yet, unix timestamp fallback");
-                }
-                device_action_t act;
-                int build_res = action_reporter_build_action(
+                bool time_synced = is_time_synced();
+                char action_json[512] = {0};
+                touch_alert_action_result_t act_res = touch_action_handle_tap(
+                    &s_alert_sched,
                     CONFIG_SPRITE_DEVICE_ID,
-                    GESTURE_TAP,
-                    active->event_id,
+                    time_synced,
                     (long long)unix_now,
-                    &act
+                    s_mqtt_connected,
+                    s_current_mode,
+                    action_json,
+                    sizeof(action_json)
                 );
 
-                if (build_res == 0) {
-                    char action_json[512];
-                    int ser_res = action_reporter_serialize_json(&act, action_json, sizeof(action_json));
-                    if (ser_res == 0 && s_mqtt_client && s_mqtt_connected) {
+                if (act_res == TOUCH_ALERT_ACT_DISMISSED_SENT) {
+                    if (s_mqtt_client) {
                         char up_topic[128];
                         snprintf(up_topic, sizeof(up_topic), "sprite/device/%s/up/action", CONFIG_SPRITE_DEVICE_ID);
                         int pub_msg_id = esp_mqtt_client_publish(s_mqtt_client, up_topic, action_json, 0, 1, 0);
                         ESP_LOGI(TAG, "Published action JSON (msg_id=%d) to %s: %s", pub_msg_id, up_topic, action_json);
-                    } else {
-                        ESP_LOGW(TAG, "Action publish skipped: ser_res=%d, mqtt_connected=%d", ser_res, s_mqtt_connected);
                     }
+                } else if (act_res == TOUCH_ALERT_ACT_BLOCKED_UNSYNCED) {
+                    ESP_LOGW(TAG, "Touch action blocked: SNTP clock not synced yet (unix_now=%lld); alert retained for retry", (long long)unix_now);
+                } else if (act_res == TOUCH_ALERT_ACT_BLOCKED_OFFLINE) {
+                    ESP_LOGW(TAG, "Touch action blocked: MQTT disconnected; alert retained for retry");
                 }
-                alert_scheduler_dismiss(&s_alert_sched, (long long)unix_now, s_current_mode);
             } else {
                 // 主屏状态下 Tap: 切换三行度量指标数值 / 百分比模式 (SPEC-003 第 6 节)
                 s_metric_view_mode = (s_metric_view_mode == UI_METRIC_VIEW_VALUE) ? UI_METRIC_VIEW_PERCENT : UI_METRIC_VIEW_VALUE;
@@ -730,6 +788,7 @@ void app_main(void) {
     ui_layout_init();
     alert_scheduler_init(&s_alert_sched);
     touch_button_init(&s_touch_button);
+    mqtt_reassembler_init(&s_mqtt_reassembler);
     bsp_st7789_set_backlight(80);
 
     // 播报开机提示音

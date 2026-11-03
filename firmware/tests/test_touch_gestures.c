@@ -5,6 +5,7 @@
 #include "sprite_types.h"
 #include "touch_button.h"
 #include "action_reporter.h"
+#include "touch_action.h"
 
 static void test_touch_jitter_debounce() {
     touch_button_state_t state;
@@ -96,12 +97,86 @@ static void test_action_reporter_payload_serialization() {
     printf("[PASS] test_action_reporter_payload_serialization\n");
 }
 
+static void test_touch_action_sntp_sync_guard() {
+    alert_scheduler_t sched;
+    alert_scheduler_init(&sched);
+
+    alert_payload_t med_alert = {
+        .priority = PRIORITY_MEDIUM,
+        .duration_sec = 8,
+        .sound = SOUND_DING
+    };
+    strncpy(med_alert.event_id, "evt_test_sntp_1", sizeof(med_alert.event_id) - 1);
+    strncpy(med_alert.title, "测试告警", sizeof(med_alert.title) - 1);
+
+    int push_rc = alert_scheduler_push(&sched, &med_alert, WORK_MODE_IDLE);
+    assert(push_rc > 0);
+    assert(sched.has_active);
+    assert(alert_scheduler_get_active(&sched) != NULL);
+
+    char action_json[512] = {0};
+
+    // 1. MQTT 已连接，但 SNTP 未同步 (unix_now < 1700000000 且 is_time_synced = false)
+    // 预期: 拦截动作发送，不生成 JSON，保留活跃告警以备校时后重试 (R5-04)
+    touch_alert_action_result_t res1 = touch_action_handle_tap(
+        &sched,
+        "esp32_c049ef",
+        false,      /* is_time_synced */
+        100LL,      /* unix_now: 开机未校时时间戳 */
+        true,       /* is_mqtt_connected */
+        WORK_MODE_IDLE,
+        action_json,
+        sizeof(action_json)
+    );
+    assert(res1 == TOUCH_ALERT_ACT_BLOCKED_UNSYNCED);
+    assert(alert_scheduler_get_active(&sched) != NULL); // 告警必须保留，绝不提前消除
+    assert(action_json[0] == '\0');
+
+    // 2. SNTP 已同步，但 MQTT 暂时离线
+    // 预期: 拦截动作发送，保留告警待重连
+    touch_alert_action_result_t res2 = touch_action_handle_tap(
+        &sched,
+        "esp32_c049ef",
+        true,          /* is_time_synced */
+        1700000050LL,  /* unix_now: 合法 Unix 时间戳 */
+        false,         /* is_mqtt_connected */
+        WORK_MODE_IDLE,
+        action_json,
+        sizeof(action_json)
+    );
+    assert(res2 == TOUCH_ALERT_ACT_BLOCKED_OFFLINE);
+    assert(alert_scheduler_get_active(&sched) != NULL); // 依然保留
+    assert(action_json[0] == '\0');
+
+    // 3. SNTP 已同步且 MQTT 在线
+    // 预期: 成功生成动作 JSON，且安全消除告警
+    touch_alert_action_result_t res3 = touch_action_handle_tap(
+        &sched,
+        "esp32_c049ef",
+        true,          /* is_time_synced */
+        1700000050LL,  /* unix_now */
+        true,          /* is_mqtt_connected */
+        WORK_MODE_IDLE,
+        action_json,
+        sizeof(action_json)
+    );
+    assert(res3 == TOUCH_ALERT_ACT_DISMISSED_SENT);
+    assert(alert_scheduler_get_active(&sched) == NULL); // 已被消除
+    assert(strstr(action_json, "\"action\":\"tap\"") != NULL);
+    assert(strstr(action_json, "\"created_at\":1700000050") != NULL);
+    assert(strstr(action_json, "\"expire_at\":1700000060") != NULL);
+    assert(strstr(action_json, "\"active_alert_id\":\"evt_test_sntp_1\"") != NULL);
+
+    printf("[PASS] test_touch_action_sntp_sync_guard\n");
+}
+
 int main(void) {
     printf("Running test_touch_gestures...\n");
     test_touch_jitter_debounce();
     test_touch_tap_detection();
     test_touch_long_press_detection();
     test_action_reporter_payload_serialization();
+    test_touch_action_sntp_sync_guard();
     printf("All test_touch_gestures tests passed successfully!\n");
     return 0;
 }

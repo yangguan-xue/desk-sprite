@@ -9,6 +9,8 @@ idf_component_register(
         "../src/engine/alert_filter.c"
         "../src/engine/alert_queue.c"
         "../src/engine/action_reporter.c"
+        "../src/engine/touch_action.c"
+        "../src/engine/mqtt_reassembler.c"
         "../src/hal/touch_button.c"
     INCLUDE_DIRS
         "."
@@ -23,6 +25,7 @@ idf_component_register(
         driver
         esp_lcd
         mqtt
+        mbedtls
         json
         lwip
 )

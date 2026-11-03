@@ -18,6 +18,20 @@ menu "Desk Sprite Configuration"
         help
             URI of the MQTT broker, e.g. mqtt://192.168.1.100:1883 or mqtts://...
 
+    config SPRITE_MQTT_CA_CERT
+        string "Custom CA Certificate (PEM format or empty to use ESP x509 Bundle)"
+        default ""
+        help
+            Optional PEM-formatted CA certificate used to verify the MQTT broker.
+            If left empty, the built-in ESP x509 Certificate Bundle (esp_crt_bundle_attach) will be used.
+
+    config SPRITE_MQTT_BROKER_COMMON_NAME
+        string "Server Certificate Common Name"
+        default ""
+        help
+            Expected common name (CN) of the broker's TLS certificate.
+            If left empty, the host from the broker URI is matched.
+
     config SPRITE_MQTT_USERNAME
         string "MQTT Username"
         default ""

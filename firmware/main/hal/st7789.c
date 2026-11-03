@@ -4,6 +4,7 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_err.h"
 #include "driver/gpio.h"
@@ -17,6 +18,19 @@ static const char *TAG = "HAL_ST7789";
 
 static esp_lcd_panel_io_handle_t s_io_handle = NULL;
 static esp_lcd_panel_handle_t s_panel_handle = NULL;
+static SemaphoreHandle_t s_trans_done_sem = NULL;
+static SemaphoreHandle_t s_lcd_mutex = NULL;
+
+static bool IRAM_ATTR lcd_color_trans_done_cb(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
+    (void)panel_io;
+    (void)edata;
+    (void)user_ctx;
+    BaseType_t high_task_awoken = pdFALSE;
+    if (s_trans_done_sem) {
+        xSemaphoreGiveFromISR(s_trans_done_sem, &high_task_awoken);
+    }
+    return high_task_awoken == pdTRUE;
+}
 
 void bsp_st7789_init(void) {
     ESP_LOGI(TAG, "Initializing ST7789 LCD (MOSI=%d, SCLK=%d, CS=%d, DC=%d, RST=%d, BL=%d)",
@@ -54,7 +68,14 @@ void bsp_st7789_init(void) {
     };
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-    // 3. 安装 LCD 驱动芯片 IO
+    // 3. 安装 LCD 驱动芯片 IO 与完成中断回调 (R5-03: 同步生命周期守护)
+    if (!s_trans_done_sem) {
+        s_trans_done_sem = xSemaphoreCreateBinary();
+    }
+    if (!s_lcd_mutex) {
+        s_lcd_mutex = xSemaphoreCreateMutex();
+    }
+
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = LCD_PIN_DC,
         .cs_gpio_num = LCD_PIN_CS,
@@ -63,6 +84,8 @@ void bsp_st7789_init(void) {
         .lcd_param_bits = 8,
         .spi_mode = 3, // ST7789 SPI Mode 3
         .trans_queue_depth = 10,
+        .on_color_trans_done = lcd_color_trans_done_cb,
+        .user_ctx = NULL,
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &s_io_handle));
 
@@ -93,19 +116,30 @@ void bsp_st7789_set_backlight(uint8_t brightness_pct) {
 }
 
 void bsp_st7789_draw_bitmap(int x_start, int y_start, int x_end, int y_end, const void *color_data) {
-    if (s_panel_handle) {
-        esp_lcd_panel_draw_bitmap(s_panel_handle, x_start, y_start, x_end, y_end, color_data);
+    if (!s_panel_handle || !color_data) return;
+    if (s_lcd_mutex) {
+        xSemaphoreTake(s_lcd_mutex, portMAX_DELAY);
+    }
+    esp_lcd_panel_draw_bitmap(s_panel_handle, x_start, y_start, x_end, y_end, color_data);
+    // 同步等待后台 DMA 发送完成，确保调用方缓冲区在返回前保持存活且未被覆盖 (R5-03)
+    if (s_trans_done_sem) {
+        if (xSemaphoreTake(s_trans_done_sem, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            ESP_LOGE(TAG, "LCD color transmission timed out");
+        }
+    }
+    if (s_lcd_mutex) {
+        xSemaphoreGive(s_lcd_mutex);
     }
 }
 
 void bsp_st7789_fill(uint16_t color) {
     if (!s_panel_handle) return;
-    static uint16_t line_buf[LCD_WIDTH * 20];
+    static uint16_t __attribute__((aligned(4))) line_buf[LCD_WIDTH * 20];
     for (int i = 0; i < LCD_WIDTH * 20; i++) {
         line_buf[i] = color;
     }
     for (int y = 0; y < LCD_HEIGHT; y += 20) {
-        esp_lcd_panel_draw_bitmap(s_panel_handle, 0, y, LCD_WIDTH, y + 20, line_buf);
+        bsp_st7789_draw_bitmap(0, y, LCD_WIDTH, y + 20, line_buf);
     }
 }
 
@@ -117,7 +151,7 @@ void bsp_st7789_fill_rect(int x, int y, int w, int h, uint16_t color) {
     if (y + h > LCD_HEIGHT) h = LCD_HEIGHT - y;
     if (w <= 0 || h <= 0) return;
 
-    static uint16_t s_chunk_buf[LCD_WIDTH * 16];
+    static uint16_t __attribute__((aligned(4))) s_chunk_buf[LCD_WIDTH * 16];
     int max_pixels = LCD_WIDTH * 16;
     for (int i = 0; i < max_pixels; i++) {
         s_chunk_buf[i] = color;
@@ -127,7 +161,7 @@ void bsp_st7789_fill_rect(int x, int y, int w, int h, uint16_t color) {
     int remaining_h = h;
     while (remaining_h > 0) {
         int lines = remaining_h > 16 ? 16 : remaining_h;
-        esp_lcd_panel_draw_bitmap(s_panel_handle, x, cur_y, x + w, cur_y + lines, s_chunk_buf);
+        bsp_st7789_draw_bitmap(x, cur_y, x + w, cur_y + lines, s_chunk_buf);
         cur_y += lines;
         remaining_h -= lines;
     }
@@ -138,7 +172,7 @@ void bsp_st7789_draw_glyph(int x, int y, uint32_t codepoint, uint16_t fg_color, 
     if (x < 0 || x + 8 > LCD_WIDTH || y < 0 || y + 8 > LCD_HEIGHT) return;
 
     const uint8_t *bitmap = font_get_glyph_8x8(codepoint);
-    uint16_t buf[64];
+    uint16_t __attribute__((aligned(4))) buf[64];
     for (int r = 0; r < 8; r++) {
         uint8_t row = bitmap[r];
         for (int c = 0; c < 8; c++) {
@@ -146,7 +180,7 @@ void bsp_st7789_draw_glyph(int x, int y, uint32_t codepoint, uint16_t fg_color, 
             buf[r * 8 + c] = set ? fg_color : bg_color;
         }
     }
-    esp_lcd_panel_draw_bitmap(s_panel_handle, x, y, x + 8, y + 8, buf);
+    bsp_st7789_draw_bitmap(x, y, x + 8, y + 8, buf);
 }
 
 void bsp_st7789_draw_string(int x, int y, const char *str, uint16_t fg, uint16_t bg) {

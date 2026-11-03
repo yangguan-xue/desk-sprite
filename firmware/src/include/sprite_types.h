@@ -52,12 +52,12 @@ typedef enum {
     GESTURE_DOUBLE_TAP = 3
 } touch_gesture_t;
 
-// 告警载荷结构体
+// 告警载荷结构体 (容纳 UTF-8 多字节中文与规范 URL, R5-02)
 typedef struct {
-    char event_id[36];
+    char event_id[64];
     priority_t priority;
-    char title[32];
-    char summary[64];
+    char title[128];
+    char summary[256];
     sound_t sound;
     pet_action_t pet_action;
     int duration_sec;
@@ -112,8 +112,8 @@ typedef struct {
     char action_id[64];     // UUIDv4 (36 chars + \0)
     char action[16];        // "tap", "long_press", "double_tap"
     char action_type[16];   // 别名兼容
-    char active_alert_id[36]; // 活跃告警 ID (如 evt_...)
-    char active_event_id[36]; // 别名兼容
+    char active_alert_id[64]; // 活跃告警 ID (如 evt_...)
+    char active_event_id[64]; // 别名兼容
     long long created_at;
     long long expire_at;    // 严格等于 created_at + 10
     long long timestamp;    // 兼容时间戳
