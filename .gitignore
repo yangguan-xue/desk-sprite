@@ -35,5 +35,7 @@ token.json
 
 # Firmware build artifacts
 firmware/build/
+firmware/sdkconfig
+firmware/sdkconfig.old
 firmware/sim/desk_sprite_sim
 
