@@ -28,10 +28,11 @@ class IdempotencyRecord:
 
 
 class IdempotencyManager:
-    def __init__(self, time_provider: Optional[Callable[[], int]] = None):
+    def __init__(self, time_provider: Optional[Callable[[], int]] = None, max_records: int = 5000):
         self._time_provider = time_provider or (lambda: int(time.time()))
         self._lock = threading.RLock()
         self._cache: Dict[str, IdempotencyRecord] = {}
+        self._max_records = max_records
 
     def _now(self, now: Optional[int] = None) -> int:
         if now is not None:
@@ -48,15 +49,18 @@ class IdempotencyManager:
         如果已存在且请求体一致，返回先前缓存的响应字典；
         如果已存在但请求体不一致，抛出 IdempotencyConflictError；
         如果不存在或已过期，占位并返回 None。
+        每次写入时主动执行有界清理 (R10)。
         """
         current_time = self._now(now)
         key = self._make_key(owner_id, idempotency_key)
         body_hash = hashlib.sha256(body_bytes).hexdigest()
 
         with self._lock:
+            # 1. 主动清理所有已过期幂等记录
+            self.cleanup_expired(now=current_time)
+
             existing = self._cache.get(key)
             if existing:
-                # 检查是否过期
                 if (current_time - existing.created_at) > existing.ttl_sec:
                     del self._cache[key]
                 else:
@@ -64,6 +68,11 @@ class IdempotencyManager:
                         return existing.response
                     else:
                         raise IdempotencyConflictError("Idempotency key conflict: payload mismatch")
+
+            # 2. 有界容量淘汰：若仍超上限，淘汰最旧记录
+            if len(self._cache) >= self._max_records:
+                oldest_key = min(self._cache.keys(), key=lambda k: self._cache[k].created_at)
+                del self._cache[oldest_key]
 
             # 首次记录占位
             self._cache[key] = IdempotencyRecord(

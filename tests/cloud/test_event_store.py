@@ -110,3 +110,34 @@ def test_cleanup_expired():
     assert store.count() == 1
     assert store.get("evt_m1", now=2000) is None
     assert store.get("evt_h1", now=2000) is not None
+
+
+def test_event_store_auto_cleanup_on_write():
+    """R10 验证: 写入新记录时自动触发过期清理，无需显式查询旧 ID"""
+    store = EventStore()
+    # 存入在 t=1000 创建的普通告警 (TTL 600)
+    store.save(EventRecord("evt_old", "esp32_1", "mac_1", None, False, created_at=1000, priority=Priority.MEDIUM))
+    assert store.count() == 1
+
+    # 在 t=2000 写入新记录，旧记录应被自动淘汰
+    store.save(EventRecord("evt_new", "esp32_1", "mac_1", None, False, created_at=2000, priority=Priority.MEDIUM))
+    assert store.count() == 1
+    # 确认内存字典中已经没有 evt_old
+    assert "evt_old" not in store._records
+    assert store.get("evt_new", now=2000) is not None
+
+
+def test_event_store_max_capacity_bounded():
+    """R10 验证: 当未过期记录超过上限时，淘汰最旧记录保持内存有界"""
+    store = EventStore(max_records=3)
+    for i in range(5):
+        store.save(EventRecord(f"evt_{i}", "esp32_1", "mac_1", None, False, created_at=1000 + i, priority=Priority.HIGH))
+
+    assert store.count() == 3
+    # 最早的 0 和 1 应被淘汰
+    assert "evt_0" not in store._records
+    assert "evt_1" not in store._records
+    assert "evt_2" in store._records
+    assert "evt_3" in store._records
+    assert "evt_4" in store._records
+

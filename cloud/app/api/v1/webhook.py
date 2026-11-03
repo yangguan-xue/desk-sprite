@@ -46,11 +46,16 @@ async def github_webhook(
             content={"code": 40001, "message": f"Validation error: invalid JSON - {e}", "data": None},
         )
 
-    # 3. 转换为标准 Alert 结构
+    # 3. 转换为标准 Alert 结构 (R12: 未完成或忽略事件返回 None)
     alert_info = convert_github_event_to_alert(
         event_type=x_github_event or "pull_request",
         payload=body_dict,
     )
+    if alert_info is None:
+        return JSONResponse(
+            status_code=200,
+            content={"code": 0, "message": "Ignored incompleted/unsupported event", "data": None},
+        )
 
     now = int(time.time())
     event_id = f"evt_gh_{uuid.uuid4().hex[:12]}"

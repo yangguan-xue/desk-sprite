@@ -144,3 +144,72 @@ def test_github_webhook_unconfigured_secret_rejected():
     assert response.status_code == 401
     assert response.json()["code"] == 40101
 
+
+def test_github_webhook_workflow_run_in_progress_ignored(client, app_and_store):
+    """R12 验证: 未完成 (in_progress, conclusion=None) 事件被忽略，绝不触发报警"""
+    _, store = app_and_store
+    payload = {
+        "action": "in_progress",
+        "workflow_run": {
+            "name": "CI Workflow",
+            "conclusion": None,
+            "display_title": "Run pytest suite",
+            "html_url": "https://github.com/my-org/repo/actions/runs/123",
+        },
+        "repository": {
+            "full_name": "my-org/repo",
+        },
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    sig = _sign(raw_body)
+
+    response = client.post(
+        "/api/v1/webhook/github",
+        content=raw_body,
+        headers={
+            "X-Hub-Signature-256": sig,
+            "X-GitHub-Event": "workflow_run",
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == 0
+    # 未写入 EventStore，无告警下发
+    assert store.count() == 0
+
+
+def test_github_webhook_workflow_run_completed_failure(client, app_and_store):
+    """R12 验证: 真正完成且失败的 workflow_run 触发 HIGH 告警"""
+    from shared.enums import Priority
+    _, store = app_and_store
+    payload = {
+        "action": "completed",
+        "workflow_run": {
+            "name": "CI Workflow",
+            "conclusion": "failure",
+            "display_title": "Build broken",
+            "html_url": "https://github.com/my-org/repo/actions/runs/124",
+        },
+        "repository": {
+            "full_name": "my-org/repo",
+        },
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    sig = _sign(raw_body)
+
+    response = client.post(
+        "/api/v1/webhook/github",
+        content=raw_body,
+        headers={
+            "X-Hub-Signature-256": sig,
+            "X-GitHub-Event": "workflow_run",
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["code"] == 0
+    assert store.count() == 1
+    rec = list(store._records.values())[0]
+    assert rec.priority == Priority.HIGH
+
+

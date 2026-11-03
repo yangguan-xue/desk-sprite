@@ -59,8 +59,20 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     logger.error(f"Error in lifecycle loop: {e}")
 
+        async def cleanup_loop():
+            while True:
+                try:
+                    await asyncio.sleep(60.0)
+                    app.state.event_store.cleanup_expired()
+                    app.state.idempotency_manager.cleanup_expired()
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Error in cleanup loop: {e}")
+
         background_tasks.append(asyncio.create_task(metrics_loop()))
         background_tasks.append(asyncio.create_task(lifecycle_loop()))
+        background_tasks.append(asyncio.create_task(cleanup_loop()))
 
     yield
 

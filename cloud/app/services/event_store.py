@@ -38,12 +38,13 @@ class EventRecord:
 
 
 class EventStore:
-    """内存/线程安全的事件记录存储引擎"""
+    """内存/线程安全的事件记录存储引擎，具备写入时自动有界清理与淘汰策略 (R10)"""
 
-    def __init__(self, time_provider: Optional[Callable[[], int]] = None):
+    def __init__(self, time_provider: Optional[Callable[[], int]] = None, max_records: int = 5000):
         self._time_provider = time_provider or (lambda: int(time.time()))
         self._lock = threading.RLock()
         self._records: Dict[str, EventRecord] = {}
+        self._max_records = max_records
 
     def _now(self, now: Optional[int] = None) -> int:
         if now is not None:
@@ -51,8 +52,16 @@ class EventStore:
         return self._time_provider()
 
     def save(self, record: EventRecord) -> None:
-        """存储一条新事件记录"""
+        """存储一条新事件记录，并在写入时主动触发过期淘汰和容量上限约束 (R10)"""
         with self._lock:
+            # 1. 主动清理已过期事件
+            self.cleanup_expired(now=record.created_at)
+
+            # 2. 有界容量淘汰：若仍超上限，淘汰最旧记录
+            if len(self._records) >= self._max_records:
+                oldest_id = min(self._records.keys(), key=lambda k: self._records[k].created_at)
+                del self._records[oldest_id]
+
             self._records[record.event_id] = record
 
     def get(self, event_id: str, now: Optional[int] = None) -> Optional[EventRecord]:

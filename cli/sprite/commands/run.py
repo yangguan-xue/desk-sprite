@@ -130,6 +130,12 @@ def run_wrapper(
             return 1
 
         if pid == 0:
+            # R11: 创建独立子进程组，使信号能转发给包含 shell 后代在内的整个进程树
+            try:
+                os.setpgid(0, 0)
+            except OSError:
+                pass
+
             try:
                 os.execvp(command_args[0], command_args)
             except FileNotFoundError:
@@ -140,11 +146,21 @@ def run_wrapper(
                 sys.stderr.write(f"Exec failed: {e}\n")
                 os._exit(127)
 
+        # 父进程尝试确保子进程组设置完毕，避免竞态
+        try:
+            os.setpgid(pid, pid)
+        except OSError:
+            pass
+
         def forward_signal(signum, frame):
             try:
-                os.kill(pid, signum)
+                # 向子进程组转发信号，确保连同后代进程（如 shell 产生的 sleep）一并退出 (R11)
+                os.killpg(pid, signum)
             except OSError:
-                pass
+                try:
+                    os.kill(pid, signum)
+                except OSError:
+                    pass
 
         old_sigint = signal.signal(signal.SIGINT, forward_signal)
         old_sigterm = signal.signal(signal.SIGTERM, forward_signal)
@@ -152,6 +168,10 @@ def run_wrapper(
         try:
             _, status = os.waitpid(pid, 0)
         except KeyboardInterrupt:
+            try:
+                os.killpg(pid, signal.SIGINT)
+            except OSError:
+                pass
             try:
                 _, status = os.waitpid(pid, 0)
             except OSError:

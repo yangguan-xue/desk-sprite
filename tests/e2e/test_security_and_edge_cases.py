@@ -174,9 +174,11 @@ def test_boundary_4_sync_barrier_no_sigttin():
         os.read(master_fd, 1024)
     except OSError:
         pass
+
+    # 先回收子进程再关闭 master PTY，避免子进程过早收到 SIGHUP (R13 修正)
+    _, status = os.waitpid(pid, 0)
     os.close(master_fd)
 
-    _, status = os.waitpid(pid, 0)
     # 验证子进程正常退出 (没有死于 SIGTTIN 信号 21)
     assert os.WIFEXITED(status)
     assert not os.WIFSIGNALED(status) or os.WTERMSIG(status) != 21

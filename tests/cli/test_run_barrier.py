@@ -73,3 +73,66 @@ def test_handoff_failure_kills_child_cleanly():
     # 包装器捕获移交失败后以 1 退出
     assert os.WIFEXITED(status)
     assert os.WEXITSTATUS(status) == 1
+
+
+def test_non_tty_signal_kills_descendant_process_group():
+    """R11 验证: 非 TTY 环境下父进程收到信号时，通过进程组转发杀死所有后台后代进程 (如 sleep)"""
+    import subprocess
+    import signal
+
+    # 启动一个包含后台后代的子进程
+    # 创建一个专属临时标记文件用于存 pid
+    pid_file = "/tmp/desk_sprite_test_r11_descendant.pid"
+    if os.path.exists(pid_file):
+        os.remove(pid_file)
+
+    script = f"echo $$ > {pid_file} && exec sleep 30"
+    
+    # 派生包装器进程 (非 TTY)
+    pipe_r, pipe_w = os.pipe()
+    wrapper_pid = os.fork()
+    if wrapper_pid == 0:
+        os.close(pipe_r)
+        # 关闭 stdin，确保处于非 TTY 分支
+        os.close(0)
+        os.open("/dev/null", os.O_RDONLY)
+        exit_code = run_wrapper(["bash", "-c", script], notify_enabled=False)
+        os._exit(exit_code)
+
+    os.close(pipe_w)
+    # 等待 pid_file 出现
+    descendant_pid = None
+    for _ in range(50):
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, "r") as f:
+                    content = f.read().strip()
+                    if content:
+                        descendant_pid = int(content)
+                        break
+            except (ValueError, IOError):
+                pass
+        time.sleep(0.05)
+
+    assert descendant_pid is not None, "Descendant process failed to start"
+
+    # 向包装器发送 SIGTERM
+    os.kill(wrapper_pid, signal.SIGTERM)
+    _, status = os.waitpid(wrapper_pid, 0)
+
+    # 验证包装器以非 0 (143 或类似) 退出
+    assert os.WIFSIGNALED(status) or (os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0)
+
+    # 关键验证: 后代进程 sleep 必须也已被终止，而不是遗留在后台！
+    time.sleep(0.1)
+    is_alive = True
+    try:
+        os.kill(descendant_pid, 0)
+    except OSError:
+        is_alive = False
+
+    if os.path.exists(pid_file):
+        os.remove(pid_file)
+
+    assert not is_alive, f"Descendant process {descendant_pid} survived SIGTERM to wrapper!"
+

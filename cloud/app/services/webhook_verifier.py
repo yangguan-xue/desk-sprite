@@ -33,8 +33,8 @@ def verify_github_signature(raw_body: bytes, signature_header: Optional[str], se
 
 def convert_github_event_to_alert(
     event_type: str, payload: Dict[str, Any], default_device: str = "esp32_c049ef", default_host: str = "macbook_pro"
-) -> Dict[str, Any]:
-    """将 GitHub 事件转换为规范的 NotifyRequest 结构"""
+) -> Optional[Dict[str, Any]]:
+    """将 GitHub 事件转换为规范的 NotifyRequest 结构。未完成或忽略事件返回 None (R12)"""
     # 1. PR 事件
     if event_type == "pull_request":
         action = payload.get("action", "")
@@ -61,16 +61,32 @@ def convert_github_event_to_alert(
             "url": url,
         }
 
-    # 2. Workflow Run (CI/CD) 事件
+    # 2. Workflow Run (CI/CD) 事件 (R12 严格规范)
     elif event_type == "workflow_run":
+        action = payload.get("action", "")
         wf = payload.get("workflow_run", {})
-        conclusion = wf.get("conclusion", "")
-        name = wf.get("name", "CI Workflow")
+        conclusion = wf.get("conclusion")
 
-        is_success = conclusion == "success"
-        priority = Priority.MEDIUM if is_success else Priority.HIGH
-        sound = Sound.DING if is_success else Sound.ALERT_BEEP
-        pet_action = PetAction.CHEER if is_success else PetAction.ALERT
+        # 仅对已完成 (action == "completed") 且 conclusion 非空的事件生成通知
+        # requested/in_progress 等事件忽略
+        if action != "completed" or not conclusion:
+            return None
+
+        name = wf.get("name", "CI Workflow")
+        if conclusion == "success":
+            priority = Priority.MEDIUM
+            sound = Sound.DING
+            pet_action = PetAction.CHEER
+        elif conclusion in ("failure", "timed_out"):
+            priority = Priority.HIGH
+            sound = Sound.ALERT_BEEP
+            pet_action = PetAction.ALERT
+        else:
+            # cancelled / skipped 等结论映射为 LOW/MUTE，不打扰工作流
+            priority = Priority.LOW
+            sound = Sound.MUTE
+            pet_action = PetAction.IDLE
+
         title = f"{name}: {conclusion}"[:24]
         summary = wf.get("display_title", name)[:48]
         url = wf.get("html_url")
