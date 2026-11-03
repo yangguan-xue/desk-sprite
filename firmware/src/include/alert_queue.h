@@ -32,6 +32,9 @@ bool alert_scheduler_dismiss(alert_scheduler_t* sched, long long now, work_mode_
 // 获取当前展示中的活跃告警
 const alert_payload_t* alert_scheduler_get_active(const alert_scheduler_t* sched);
 
+// 获取当前活跃告警在调度器中的展示剩余秒数 (R3-07)
+int alert_scheduler_get_remaining_sec(const alert_scheduler_t* sched);
+
 // 清空等待队列中的所有 Medium 告警
 void alert_scheduler_clear_medium(alert_scheduler_t* sched);
 

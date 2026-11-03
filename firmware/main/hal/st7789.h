@@ -4,13 +4,13 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// ST7789 Pinout (SPEC-003 第 1.2 节)
-#define LCD_PIN_MOSI 11
-#define LCD_PIN_SCLK 12
-#define LCD_PIN_CS   10
-#define LCD_PIN_DC   9
-#define LCD_PIN_RST  14
-#define LCD_PIN_BL   48
+// ST7789 Pinout (实测 USB 小电视 S3 硬件板型 board-profile.json)
+#define LCD_PIN_MOSI 1
+#define LCD_PIN_SCLK 18
+#define LCD_PIN_CS   21
+#define LCD_PIN_DC   17
+#define LCD_PIN_RST  6
+#define LCD_PIN_BL   2
 
 #define LCD_WIDTH    240
 #define LCD_HEIGHT   240

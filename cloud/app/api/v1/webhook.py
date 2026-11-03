@@ -105,9 +105,28 @@ async def github_webhook(
         ),
     )
 
-    if mqtt_service:
-        topic = f"sprite/device/{target_device}/down/alert"
-        mqtt_service.publish(topic, alert_payload.model_dump_json(), qos=1)
+    # 6. 下发到 MQTT Broker (RR01 / R3-01 强投递语义与可重试错误)
+    if not mqtt_service or not mqtt_service.is_connected:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": 50301,
+                "message": "MQTT delivery failed: broker not connected",
+                "data": {"retryable": True},
+            },
+        )
+
+    topic = f"sprite/device/{target_device}/down/alert"
+    delivered = mqtt_service.publish(topic, alert_payload.model_dump_json(), qos=1)
+    if not delivered:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "code": 50301,
+                "message": "MQTT delivery failed: publish rejected",
+                "data": {"retryable": True},
+            },
+        )
 
     return JSONResponse(
         status_code=200,

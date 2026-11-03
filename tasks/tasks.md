@@ -416,22 +416,20 @@ flowchart TD
   - `mkdir -p firmware/build && gcc -Wall -Wextra -I firmware/src -I firmware/tests firmware/src/hal/touch_button.c firmware/src/engine/action_reporter.c firmware/tests/test_touch_gestures.c -o firmware/build/test_touch_gestures && ./firmware/build/test_touch_gestures`
 
 ### TASK-017: ESP-IDF 物理外设驱动集成与编译构建
-- **模块归属**: `firmware/main/`, `firmware/src/hal/`
+- **模块归属**: `firmware/main/`, `firmware/main/hal/`
+- **当前状态**: **待实机刷机验收 (Pending Physical Board Acceptance, R3-02)**
 - **依赖任务**: TASK-014, TASK-015, TASK-016
-- **输入**: [SPEC-003](../specs/003-sprite-display-and-state-machine.md) 1 节
+- **输入**: [SPEC-003](../specs/003-sprite-display-and-state-machine.md) 1 节, [SPEC-005](../specs/005-connected-device-system-specification.md), [board-profile.json](../docs/hardware/2026-11-03-usb-inspection/board-profile.json)
 - **交付物**:
-  - `firmware/CMakeLists.txt`, `firmware/main/CMakeLists.txt`: ESP-IDF v5.1.2 构建脚本。
-  - `firmware/main/main.c`: 固件启动主入口与 FreeRTOS 任务调度。
-  - `firmware/src/hal/st7789_driver.c`: ST7789V 硬件 SPI 驱动与 PWM 背光控制。
-  - `firmware/src/hal/es8311_driver.c`: ES8311 I2S/I2C 音频驱动与 `PA_EN` (GPIO 47) 硬件静音控制。
-  - `firmware/src/hal/touch_driver.c`: TTP223 GPIO 4 中断服务。
-  - `firmware/src/net/mqtt_client.c`: ESP-MQTT 客户端集成与 LWT 遗嘱设置。
+  - `firmware/CMakeLists.txt`, `firmware/main/CMakeLists.txt`: ESP-IDF v5.1.2 构建配置。
+  - `firmware/main/main.c`: 固件完整运行入口（Wi-Fi/MQTT 连接、调度器驱动、`touch_poll_task` 与 `ui_and_alert_task` 视听交互闭环）。
+  - `firmware/main/hal/st7789.c`, `firmware/main/hal/st7789.h`: ST7789V 硬件 SPI Mode 3 驱动与 PWM 背光控制（引脚 MOSI 1, SCLK 18, DC 17, RST 6, BL 2）。
+  - `firmware/main/hal/es8311.c`, `firmware/main/hal/es8311.h`: ES8311 I2C (SDA 40, SCL 39) 与 I2S (MCLK 38, BCLK 16, WS 7, DOUT 4, PA_EN 8) 编解码器驱动与提示音播放。
+  - `firmware/main/hal/ttp223.c`, `firmware/main/hal/ttp223.h`: GPIO 5 原生触摸按键输入。
 - **技术约束**:
-  - 引脚连接严格匹配 SPEC-003 Pinout 映射表；
-  - PSRAM 双行缓冲区优化 (240×40 像素)；
-  - 音频限制：16kHz, 16-bit 单声道 WAV，时长 0.4~0.8 秒，单文件 ≤ 26KB；
-  - 离线退避：MQTT 掉线后状态栏指示灯变黄，启动指数退避重连；
-  - 硬件环境依赖：需要物理 ESP32-S3-DevKitC-1 开发板与 ESP-IDF v5.1.2 工具链。
+  - 引脚连接严格匹配实测板型 `board-profile.json`；
+  - 音频链路：16kHz, 16-bit 单声道/立体声，880Hz 提示音；
+  - 硬件环境依赖：需要物理 ESP32-S3 开发板与 ESP-IDF 工具链；实机刷机验证前保留为未验收。
 - **可执行验证命令**:
   - `cd firmware && idf.py build` (生成 bin 镜像，且 Flash/RAM 分区预算不超限)
 

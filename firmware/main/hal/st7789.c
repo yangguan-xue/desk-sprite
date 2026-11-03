@@ -57,10 +57,10 @@ void bsp_st7789_init(void) {
     esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = LCD_PIN_DC,
         .cs_gpio_num = LCD_PIN_CS,
-        .pclk_hz = 40 * 1000 * 1000, // 40MHz
+        .pclk_hz = 27 * 1000 * 1000, // 27MHz 实测稳定频率 (board-profile.json)
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
-        .spi_mode = 0,
+        .spi_mode = 3, // ST7789 SPI Mode 3
         .trans_queue_depth = 10,
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &s_io_handle));
@@ -78,10 +78,10 @@ void bsp_st7789_init(void) {
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_panel_handle, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel_handle, true));
 
-    // 5. 初始填充科技蓝绿底色并点亮背光
-    bsp_st7789_fill(0x0410); // 深蓝绿底色
-    bsp_st7789_set_backlight(80); // 80% 亮度
-    ESP_LOGI(TAG, "ST7789 initialized and backlight turned on at 80%%");
+    // 5. 初始填充亮红色 (0xF800) 并 100% 满亮度点亮背光
+    bsp_st7789_fill(0xF800); // 纯红
+    bsp_st7789_set_backlight(100);
+    ESP_LOGI(TAG, "ST7789 initialized and screen filled with RED (0xF800)");
 }
 
 void bsp_st7789_set_backlight(uint8_t brightness_pct) {

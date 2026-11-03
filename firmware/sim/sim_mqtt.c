@@ -5,16 +5,30 @@
 #include <string.h>
 #include <time.h>
 
+static sim_mqtt_config_t g_config;
+static bool g_initialized = false;
+
 #ifdef HAS_MOSQUITTO
 #include <mosquitto.h>
+#include <unistd.h>
 static struct mosquitto* g_mosq = NULL;
 static bool g_mqtt_connected = false;
+static volatile int g_connack_rc = -1;
+static volatile bool g_connack_received = false;
 
 static void on_mosq_connect(struct mosquitto* mosq, void* userdata, int rc) {
     (void)mosq; (void)userdata;
+    g_connack_received = true;
+    g_connack_rc = rc;
     if (rc == 0) {
         g_mqtt_connected = true;
         printf("[Sim MQTT] Connected to Broker successfully\n");
+        if (g_config.device_id) {
+            char sub_topic[128];
+            snprintf(sub_topic, sizeof(sub_topic), "sprite/device/%s/down/#", g_config.device_id);
+            mosquitto_subscribe(g_mosq, NULL, sub_topic, 1);
+            printf("[Sim MQTT] Subscribed to %s\n", sub_topic);
+        }
     } else {
         g_mqtt_connected = false;
         fprintf(stderr, "[Sim MQTT] Broker rejected connection: rc=%d\n", rc);
@@ -26,9 +40,6 @@ static void on_mosq_disconnect(struct mosquitto* mosq, void* userdata, int rc) {
     g_mqtt_connected = false;
 }
 #endif
-
-static sim_mqtt_config_t g_config;
-static bool g_initialized = false;
 
 // 简单的 JSON 字段提取辅助函数
 static const char* json_get_string(const char* json, const char* key, char* out, size_t max_len) {
@@ -127,6 +138,10 @@ void sim_mqtt_handle_message(const char* topic, const char* payload) {
             else if (strcmp(mode_str, "sleep") == 0) mode = WORK_MODE_SLEEP;
 
             g_config.on_state(mode);
+        }
+    } else if (strstr(topic, "/down/dismiss")) {
+        if (g_config.on_dismiss) {
+            g_config.on_dismiss();
         }
     } else if (strstr(topic, "/down/metrics")) {
         if (g_config.on_metrics) {
@@ -236,16 +251,38 @@ int sim_mqtt_init(const sim_mqtt_config_t* config) {
     mosquitto_disconnect_callback_set(g_mosq, on_mosq_disconnect);
     mosquitto_message_callback_set(g_mosq, on_mosq_message);
 
+    g_connack_received = false;
+    g_connack_rc = -1;
+
     int rc = mosquitto_connect(g_mosq, config->broker_host, config->broker_port, 60);
     if (rc != MOSQ_ERR_SUCCESS) {
         fprintf(stderr, "[Sim MQTT] Connect failed: %s\n", mosquitto_strerror(rc));
         return -1;
     }
 
-    char sub_topic[128];
-    snprintf(sub_topic, sizeof(sub_topic), "sprite/device/%s/down/#", config->device_id);
-    mosquitto_subscribe(g_mosq, NULL, sub_topic, 1);
-    printf("[Sim MQTT] Subscribed to %s (User: %s)\n", sub_topic, user_ptr);
+    if (config->strict_mqtt) {
+        // 在有界超时 (3000ms) 内等待 CONNACK 确认，严禁把认证拒绝判为成功 (R3-04)
+        int elapsed_ms = 0;
+        const int timeout_ms = 3000;
+        while (!g_connack_received && elapsed_ms < timeout_ms) {
+            mosquitto_loop(g_mosq, 50, 1);
+            usleep(50000); // 50ms
+            elapsed_ms += 50;
+        }
+
+        if (!g_connack_received) {
+            fprintf(stderr, "[Sim MQTT] Strict MQTT connection timed out after %d ms\n", timeout_ms);
+            return -1;
+        }
+
+        if (g_connack_rc != 0) {
+            fprintf(stderr, "[Sim MQTT] Strict MQTT authentication rejected by broker: rc=%d\n", g_connack_rc);
+            return g_connack_rc;
+        }
+    } else {
+        // 非 strict 模式下，快速轮询一次网络驱动握手
+        mosquitto_loop(g_mosq, 10, 1);
+    }
 #else
     printf("[Sim MQTT] Initialized in headless/standalone mode for %s\n",
            config->device_id ? config->device_id : "unknown");

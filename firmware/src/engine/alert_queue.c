@@ -140,3 +140,8 @@ const alert_payload_t* alert_scheduler_get_active(const alert_scheduler_t* sched
     if (!sched || !sched->has_active) return NULL;
     return &sched->active_alert;
 }
+
+int alert_scheduler_get_remaining_sec(const alert_scheduler_t* sched) {
+    if (!sched || !sched->has_active) return 0;
+    return sched->remaining_sec;
+}

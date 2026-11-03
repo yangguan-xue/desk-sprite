@@ -17,11 +17,10 @@
 
 #ifdef HAS_SDL2
 #include <SDL.h>
-#include "font8x8.h"
+#include "font_utf8.h"
 
-static void sim_draw_char(SDL_Renderer* renderer, int x, int y, char c, SDL_Color color, int scale) {
-    if ((uint8_t)c > 127) c = '?';
-    const uint8_t* glyph = font8x8_basic[(uint8_t)c];
+static void sim_draw_glyph(SDL_Renderer* renderer, int x, int y, uint32_t cp, SDL_Color color, int scale) {
+    const uint8_t* glyph = sim_get_glyph(cp);
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
     for (int row = 0; row < 8; row++) {
         uint8_t bits = glyph[row];
@@ -38,21 +37,46 @@ static void sim_draw_char(SDL_Renderer* renderer, int x, int y, char c, SDL_Colo
     }
 }
 
-static void sim_draw_string(SDL_Renderer* renderer, int x, int y, const char* str, SDL_Color color, int scale) {
+static void sim_draw_string_wrapped(SDL_Renderer* renderer, int x, int y, int max_w, int max_h, const char* str, SDL_Color color, int scale) {
     if (!str) return;
     int cur_x = x;
-    while (*str) {
-        if (*str == '\n') break;
-        sim_draw_char(renderer, cur_x, y, *str, color, scale);
-        cur_x += 8 * scale;
-        str++;
+    int cur_y = y;
+    int line_height = 10 * scale;
+    int char_w = 8 * scale;
+
+    const char* ptr = str;
+    while (*ptr) {
+        if (*ptr == '\n') {
+            cur_x = x;
+            cur_y += line_height;
+            if (cur_y + 8 * scale > y + max_h) break;
+            ptr++;
+            continue;
+        }
+        if (cur_x + char_w > x + max_w) {
+            // 自动换行 (R3-05)
+            cur_x = x;
+            cur_y += line_height;
+            if (cur_y + 8 * scale > y + max_h) break;
+        }
+        uint32_t cp = utf8_next_codepoint(&ptr);
+        if (cp == 0) break;
+        sim_draw_glyph(renderer, cur_x, cur_y, cp, color, scale);
+        cur_x += char_w;
     }
+}
+
+static void sim_draw_string(SDL_Renderer* renderer, int x, int y, const char* str, SDL_Color color, int scale) {
+    sim_draw_string_wrapped(renderer, x, y, 240 - x - 4, 240 - y, str, color, scale);
 }
 #endif
 
 static volatile bool g_running = true;
 static alert_scheduler_t g_alert_sched;
 static work_mode_t g_current_mode = WORK_MODE_IDLE;
+static ui_metric_view_mode_t g_metric_view_mode = UI_METRIC_VIEW_VALUE;
+static long long g_mute_until_sec = 0;
+static touch_button_state_t g_touch_button;
 
 static metrics_payload_t g_last_metrics;
 static ui_metrics_render_model_t g_metrics_render_model;
@@ -73,8 +97,10 @@ static void on_alert(const alert_payload_t* alert) {
 
     // 接入阶段 1 入队过滤与优先级调度 (R06)
     int pushed = alert_scheduler_push(&g_alert_sched, alert, g_current_mode);
-    if (pushed == 0) {
+    if (pushed >= 2) {
         printf("[Sim Main] Alert admitted to scheduler queue.\n");
+    } else if (pushed == 1) {
+        printf("[Sim Main] Alert admitted as status dot.\n");
     } else {
         printf("[Sim Main] Alert filtered/dropped by mode %d or queue policy.\n", g_current_mode);
     }
@@ -85,7 +111,7 @@ static void on_metrics(const metrics_payload_t* metrics) {
            metrics->item_count, metrics->ttl_sec, metrics->sampled_at);
     g_last_metrics = *metrics;
     g_has_metrics = true;
-    ui_metrics_compute_render_model(&g_last_metrics, (long long)time(NULL), &g_metrics_render_model);
+    ui_metrics_compute_render_model_ex(&g_last_metrics, (long long)time(NULL), g_metric_view_mode, &g_metrics_render_model);
 }
 
 static void on_state(work_mode_t mode) {
@@ -100,7 +126,16 @@ static void on_state(work_mode_t mode) {
     }
 }
 
+static void on_dismiss(void) {
+    long long now = (long long)time(NULL);
+    alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
+    printf("[Sim Main] Active alert dismissed\n");
+}
+
 int main(int argc, char* argv[]) {
+    // 强制无缓冲标准输出，确保作为子进程执行时管道即时刷新 (R3-06)
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     bool headless = false;
     bool run_once = false;
     bool standalone = false;
@@ -125,6 +160,12 @@ int main(int argc, char* argv[]) {
             strict_mqtt = true;
         } else if (strcmp(argv[i], "--tls") == 0) {
             tls_enabled = true;
+        } else if (strcmp(argv[i], "--mode") == 0 && i + 1 < argc) {
+            const char* m = argv[++i];
+            if (strcmp(m, "coding") == 0) g_current_mode = WORK_MODE_CODING;
+            else if (strcmp(m, "meeting") == 0) g_current_mode = WORK_MODE_MEETING;
+            else if (strcmp(m, "sleep") == 0) g_current_mode = WORK_MODE_SLEEP;
+            else g_current_mode = WORK_MODE_IDLE;
         } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
             broker_port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
@@ -150,6 +191,7 @@ int main(int argc, char* argv[]) {
     ui_layout_init();
     sim_audio_init();
     alert_scheduler_init(&g_alert_sched);
+    touch_button_init(&g_touch_button);
 
     // 默认初始看板数据 (Copilot 18/30 60% remaining, RR07)
     memset(&g_last_metrics, 0, sizeof(g_last_metrics));
@@ -184,7 +226,7 @@ int main(int argc, char* argv[]) {
     g_last_metrics.items[2].status = METRIC_STATUS_NORMAL;
     g_last_metrics.items[2].is_mock = true;
 
-    ui_metrics_compute_render_model(&g_last_metrics, (long long)time(NULL), &g_metrics_render_model);
+    ui_metrics_compute_render_model_ex(&g_last_metrics, (long long)time(NULL), g_metric_view_mode, &g_metrics_render_model);
     g_has_metrics = true;
 
     if (!standalone) {
@@ -196,9 +238,11 @@ int main(int argc, char* argv[]) {
             .password = password,
             .ca_cert = ca_cert,
             .tls_enabled = tls_enabled,
+            .strict_mqtt = strict_mqtt,
             .on_alert = on_alert,
             .on_metrics = on_metrics,
             .on_state = on_state,
+            .on_dismiss = on_dismiss,
         };
         int m_rc = sim_mqtt_init(&mqtt_cfg);
         if (m_rc != 0) {
@@ -240,12 +284,14 @@ int main(int argc, char* argv[]) {
 
     int tick_count = 0;
     time_t last_sec = time(NULL);
-    uint32_t mouse_down_time_ms = 0;
-    bool mouse_is_down = false;
 
     while (g_running) {
         if (!standalone) {
             sim_mqtt_loop(50);
+            if (strict_mqtt && !sim_mqtt_is_connected()) {
+                fprintf(stderr, "[Sim Main] Strict MQTT disconnected, exiting with code 1\n");
+                return 1;
+            }
         }
 
         long long now = (long long)time(NULL);
@@ -257,7 +303,7 @@ int main(int argc, char* argv[]) {
 
             // 定期重新计算 metrics stale 状态
             if (g_has_metrics) {
-                ui_metrics_compute_render_model(&g_last_metrics, now, &g_metrics_render_model);
+                ui_metrics_compute_render_model_ex(&g_last_metrics, now, g_metric_view_mode, &g_metrics_render_model);
             }
         }
 
@@ -265,54 +311,68 @@ int main(int argc, char* argv[]) {
         const alert_payload_t* active_alert = alert_scheduler_get_active(&g_alert_sched);
         if (active_alert) {
             ui_layout_show_alert(active_alert);
-            // 若为新弹出的告警，播放提示音
+            // 若为新弹出的告警，播放提示音 (R3-03: 临时静音期间屏蔽 medium 音效)
             if (strcmp(g_last_played_event_id, active_alert->event_id) != 0) {
+                printf("[Sim UI] Alert popup rendered on screen: %s [%s]\n",
+                       active_alert->title,
+                       active_alert->priority == PRIORITY_HIGH ? "HIGH" : (active_alert->priority == PRIORITY_MEDIUM ? "MED" : "LOW"));
                 strncpy(g_last_played_event_id, active_alert->event_id, sizeof(g_last_played_event_id) - 1);
-                sim_audio_play(active_alert->sound, active_alert->force_mute);
+                bool mute = active_alert->force_mute;
+                if (!mute && active_alert->priority == PRIORITY_MEDIUM && now < g_mute_until_sec) {
+                    printf("[Sim Audio] Temporary mute active (remaining %llds), muting medium alert sound\n", g_mute_until_sec - now);
+                    mute = true;
+                }
+                sim_audio_play(active_alert->sound, mute);
             }
         } else {
             g_last_played_event_id[0] = '\0';
         }
 
 #ifdef HAS_SDL2
+        static bool s_mouse_is_down = false;
         if (!headless && window) {
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
                 if (event.type == SDL_QUIT) {
                     g_running = false;
                 } else if (event.type == SDL_MOUSEBUTTONDOWN) {
-                    mouse_is_down = true;
-                    mouse_down_time_ms = SDL_GetTicks();
+                    s_mouse_is_down = true;
                 } else if (event.type == SDL_MOUSEBUTTONUP) {
-                    if (mouse_is_down) {
-                        mouse_is_down = false;
-                        uint32_t duration_ms = SDL_GetTicks() - mouse_down_time_ms;
-                        const char* alert_id = active_alert ? active_alert->event_id : NULL;
+                    s_mouse_is_down = false;
+                }
+            }
 
-                        if (duration_ms < 500) {
-                            // GESTURE_TAP (单击, RR04)
-                            printf("[Sim Input] GESTURE_TAP detected (%u ms)\n", duration_ms);
-                            device_action_t act;
-                            action_reporter_build_action(device_id, GESTURE_TAP, alert_id, now, &act);
-                            if (!standalone) sim_mqtt_publish_action(&act);
+            long long now_ms = (long long)SDL_GetTicks();
+            touch_gesture_t gesture = touch_button_update(&g_touch_button, s_mouse_is_down, now_ms);
+            const char* alert_id = active_alert ? active_alert->event_id : NULL;
 
-                            if (active_alert) {
-                                printf("[Sim Input] Active alert %s interacted & dismissed via Tap\n", alert_id);
-                                alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
-                            } else {
-                                printf("[Sim Input] Dashboard tapped: toggle unit display\n");
-                            }
-                        } else if (duration_ms >= 1500) {
-                            // GESTURE_LONG_PRESS (长按, RR04)
-                            printf("[Sim Input] GESTURE_LONG_PRESS detected (%u ms)\n", duration_ms);
-                            if (active_alert) {
-                                // 静默消除告警: 规范要求严禁向云端上报 open_url 动作报文
-                                printf("[Sim Input] Active alert %s silently dismissed via Long Press (no action sent)\n", alert_id);
-                                alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
-                            } else {
-                                printf("[Sim Input] Dashboard long press: temporary mute 30 min\n");
-                            }
-                        }
+            if (gesture == GESTURE_TAP) {
+                printf("[Sim Input] GESTURE_TAP detected via touch_button\n");
+                if (active_alert) {
+                    device_action_t act;
+                    action_reporter_build_action(device_id, GESTURE_TAP, alert_id, now, &act);
+                    if (!standalone) sim_mqtt_publish_action(&act);
+                    printf("[Sim Input] Active alert %s interacted & dismissed via Tap\n", alert_id);
+                    alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
+                } else {
+                    g_metric_view_mode = (g_metric_view_mode == UI_METRIC_VIEW_VALUE) ? UI_METRIC_VIEW_PERCENT : UI_METRIC_VIEW_VALUE;
+                    printf("[Sim Input] Dashboard tapped: toggle metric view mode to %s\n",
+                           (g_metric_view_mode == UI_METRIC_VIEW_PERCENT) ? "PERCENT" : "VALUE");
+                    ui_metrics_compute_render_model_ex(&g_last_metrics, now, g_metric_view_mode, &g_metrics_render_model);
+                }
+            } else if (gesture == GESTURE_LONG_PRESS) {
+                printf("[Sim Input] GESTURE_LONG_PRESS detected via touch_button\n");
+                if (active_alert) {
+                    // 静默消除告警: 规范要求严禁向云端上报 open_url 动作报文
+                    printf("[Sim Input] Active alert %s silently dismissed via Long Press (no action sent)\n", alert_id);
+                    alert_scheduler_dismiss(&g_alert_sched, now, g_current_mode);
+                } else {
+                    if (now < g_mute_until_sec) {
+                        g_mute_until_sec = 0;
+                        printf("[Sim Input] Dashboard long press: temporary mute disabled\n");
+                    } else {
+                        g_mute_until_sec = now + 1800;
+                        printf("[Sim Input] Dashboard long press: temporary mute enabled for 30 min (until %lld)\n", g_mute_until_sec);
                     }
                 }
             }
@@ -353,6 +413,11 @@ int main(int argc, char* argv[]) {
             SDL_Color gray_color = {156, 163, 175, 255};
             sim_draw_string(renderer, 36, 8, mode_tag, gray_color, 1);
 
+            if (now < g_mute_until_sec) {
+                SDL_Color yellow_col = {245, 158, 11, 255};
+                sim_draw_string(renderer, 150, 8, "[MUTE]", yellow_col, 1);
+            }
+
             // 2. 舞台区域 (y: 24~167)
             if (active_alert) {
                 // 告警弹窗覆盖层 (RR08: 实际渲染可读文本、倒计时与优先级)
@@ -367,15 +432,21 @@ int main(int argc, char* argv[]) {
                 // 绘制标题
                 sim_draw_string(renderer, 20, 38, active_alert->title, white_color, 1);
 
-                // 绘制摘要 (最多两行)
-                sim_draw_string(renderer, 20, 54, active_alert->summary, white_color, 1);
+                // 绘制摘要 (最多两行，自动换行, R3-05)
+                sim_draw_string_wrapped(renderer, 20, 52, 200, 24, active_alert->summary, white_color, 1);
 
-                // 绘制倒计时
-                char cd_buf[32];
-                int left_sec = (int)(active_alert->expire_at - now);
-                if (left_sec < 0) left_sec = 0;
-                snprintf(cd_buf, sizeof(cd_buf), "Expires: %ds", left_sec);
-                sim_draw_string(renderer, 20, 78, cd_buf, gray_color, 1);
+                // 绘制倒计时与交互提示 (R3-07, SPEC-003 第 3 节)
+                if (active_alert->priority == PRIORITY_HIGH) {
+                    // High 优先级必须手动确认，无倒计时自动关闭
+                    sim_draw_string(renderer, 20, 78, "Action: Manual Ack Required", white_color, 1);
+                } else {
+                    // Medium 优先级显示调度器剩余展示时长 (duration_sec 倒计时)
+                    char cd_buf[32];
+                    int rem_sec = alert_scheduler_get_remaining_sec(&g_alert_sched);
+                    if (rem_sec < 0) rem_sec = 0;
+                    snprintf(cd_buf, sizeof(cd_buf), "Duration: %ds", rem_sec);
+                    sim_draw_string(renderer, 20, 78, cd_buf, gray_color, 1);
+                }
 
                 // 交互提示栏
                 sim_draw_string(renderer, 20, 142, "Tap:Open | Hold:Dismiss", white_color, 1);

@@ -17,10 +17,34 @@ from cloud.app.main import create_app
 from cloud.app.services.event_store import EventStore
 
 
+class MockConnectedMQTT:
+    def __init__(self, connected: bool = True):
+        self._connected = connected
+        self.published = []
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def set_connected(self, val: bool) -> None:
+        self._connected = val
+
+    def publish(self, topic: str, payload: str, qos: int = 1, retain: bool = False) -> bool:
+        if not self._connected:
+            return False
+        self.published.append((topic, payload, qos, retain))
+        return True
+
+
 @pytest.fixture
-def app_and_store():
+def mock_mqtt():
+    return MockConnectedMQTT(connected=True)
+
+
+@pytest.fixture
+def app_and_store(mock_mqtt):
     store = EventStore()
-    app = create_app(event_store=store, webhook_secret="super_secret_key")
+    app = create_app(event_store=store, webhook_secret="super_secret_key", mqtt_service=mock_mqtt)
     return app, store
 
 
@@ -211,5 +235,73 @@ def test_github_webhook_workflow_run_completed_failure(client, app_and_store):
     assert store.count() == 1
     rec = list(store._records.values())[0]
     assert rec.priority == Priority.HIGH
+
+
+def test_github_webhook_mqtt_disconnected_returns_503(app_and_store, mock_mqtt):
+    """R3-01: MQTT 离线时 Webhook 返回 503 与 retryable=True，以便调用方重试"""
+    app, store = app_and_store
+    mock_mqtt.set_connected(False)
+    client = TestClient(app)
+
+    payload = {
+        "action": "completed",
+        "workflow_run": {
+            "name": "CI Workflow",
+            "conclusion": "success",
+            "display_title": "Build succeeded",
+            "html_url": "https://github.com/my-org/repo/actions/runs/125",
+        },
+        "repository": {"full_name": "my-org/repo"},
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    sig = _sign(raw_body)
+
+    response = client.post(
+        "/api/v1/webhook/github",
+        content=raw_body,
+        headers={
+            "X-Hub-Signature-256": sig,
+            "X-GitHub-Event": "workflow_run",
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 503
+    data = response.json()
+    assert data["code"] == 50301
+    assert data["data"]["retryable"] is True
+
+
+def test_github_webhook_publish_rejected_returns_503(app_and_store, mock_mqtt):
+    """R3-01: MQTT publish 拒绝时 Webhook 返回 503 与 retryable=True"""
+    app, store = app_and_store
+    mock_mqtt.publish = lambda *args, **kwargs: False
+    client = TestClient(app)
+
+    payload = {
+        "action": "completed",
+        "workflow_run": {
+            "name": "CI Workflow",
+            "conclusion": "success",
+            "display_title": "Build succeeded",
+            "html_url": "https://github.com/my-org/repo/actions/runs/126",
+        },
+        "repository": {"full_name": "my-org/repo"},
+    }
+    raw_body = json.dumps(payload).encode("utf-8")
+    sig = _sign(raw_body)
+
+    response = client.post(
+        "/api/v1/webhook/github",
+        content=raw_body,
+        headers={
+            "X-Hub-Signature-256": sig,
+            "X-GitHub-Event": "workflow_run",
+            "Content-Type": "application/json",
+        },
+    )
+    assert response.status_code == 503
+    data = response.json()
+    assert data["code"] == 50301
+    assert data["data"]["retryable"] is True
 
 

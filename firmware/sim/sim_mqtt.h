@@ -10,6 +10,7 @@ extern "C" {
 typedef void (*alert_callback_t)(const alert_payload_t* alert);
 typedef void (*metrics_callback_t)(const metrics_payload_t* metrics);
 typedef void (*state_callback_t)(work_mode_t mode);
+typedef void (*dismiss_callback_t)(void);
 
 typedef struct {
     const char* broker_host;
@@ -19,9 +20,11 @@ typedef struct {
     const char* password;
     const char* ca_cert;
     bool tls_enabled;
+    bool strict_mqtt;
     alert_callback_t on_alert;
     metrics_callback_t on_metrics;
     state_callback_t on_state;
+    dismiss_callback_t on_dismiss;
 } sim_mqtt_config_t;
 
 int sim_mqtt_init(const sim_mqtt_config_t* config);

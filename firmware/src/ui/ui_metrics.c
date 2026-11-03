@@ -2,9 +2,10 @@
 #include <stdio.h>
 #include <string.h>
 
-int ui_metrics_compute_render_model(
+int ui_metrics_compute_render_model_ex(
     const metrics_payload_t* payload,
     long long current_time,
+    ui_metric_view_mode_t view_mode,
     ui_metrics_render_model_t* out_model
 ) {
     if (!payload || !out_model) return -1;
@@ -40,23 +41,47 @@ int ui_metrics_compute_render_model(
         if (ratio > 1.0f) ratio = 1.0f;
         dst->progress_ratio = ratio;
 
-        // 格式化文本
-        if (row_stale) {
-            snprintf(dst->rendered_text, sizeof(dst->rendered_text),
-                     "%s: %.0f/%.0f %s [STALE]",
-                     src->label[0] ? src->label : src->key,
-                     src->current, src->total, src->unit);
+        // 格式化文本 (SPEC-003 第 6 节: 支持详细数值与百分比模式切换)
+        int pct = src->percent > 0 ? src->percent : (int)(ratio * 100.0f + 0.5f);
+        if (view_mode == UI_METRIC_VIEW_PERCENT) {
+            if (row_stale) {
+                snprintf(dst->rendered_text, sizeof(dst->rendered_text),
+                         "%s: %d%% [STALE]",
+                         src->label[0] ? src->label : src->key,
+                         pct);
+            } else {
+                snprintf(dst->rendered_text, sizeof(dst->rendered_text),
+                         "%s: %d%%%s",
+                         src->label[0] ? src->label : src->key,
+                         pct,
+                         src->is_mock ? " [M]" : "");
+            }
         } else {
-            snprintf(dst->rendered_text, sizeof(dst->rendered_text),
-                     "%s: %.0f/%.0f %s%s",
-                     src->label[0] ? src->label : src->key,
-                     src->current, src->total, src->unit,
-                     src->is_mock ? " [M]" : "");
+            if (row_stale) {
+                snprintf(dst->rendered_text, sizeof(dst->rendered_text),
+                         "%s: %.0f/%.0f %s [STALE]",
+                         src->label[0] ? src->label : src->key,
+                         src->current, src->total, src->unit);
+            } else {
+                snprintf(dst->rendered_text, sizeof(dst->rendered_text),
+                         "%s: %.0f/%.0f %s%s",
+                         src->label[0] ? src->label : src->key,
+                         src->current, src->total, src->unit,
+                         src->is_mock ? " [M]" : "");
+            }
         }
     }
 
     out_model->is_stale = has_any_stale;
     return 0;
+}
+
+int ui_metrics_compute_render_model(
+    const metrics_payload_t* payload,
+    long long current_time,
+    ui_metrics_render_model_t* out_model
+) {
+    return ui_metrics_compute_render_model_ex(payload, current_time, UI_METRIC_VIEW_VALUE, out_model);
 }
 
 void ui_metrics_render_text(const ui_metrics_render_model_t* model, char* buffer, size_t buf_len) {

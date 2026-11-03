@@ -3,8 +3,8 @@
 
 #include <stdbool.h>
 
-// TTP223 Pinout (SPEC-003 第 1.2 节)
-#define TOUCH_PIN_KEY 4
+// 触摸按键 Pinout (实测硬件 S3 原生触摸直连 GPIO5)
+#define TOUCH_PIN_KEY 5
 
 void bsp_ttp223_init(void);
 bool bsp_ttp223_read(void);
