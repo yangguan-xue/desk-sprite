@@ -52,7 +52,7 @@ void bsp_st7789_init(void) {
         .timer_sel      = LEDC_TIMER_0,
         .intr_type      = LEDC_INTR_DISABLE,
         .gpio_num       = LCD_PIN_BL,
-        .duty           = 0,
+        .duty           = 255, // 初始置 255 关断 AO3401 (低电平导通)，避免开机花屏
         .hpoint         = 0
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
@@ -89,10 +89,10 @@ void bsp_st7789_init(void) {
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &s_io_handle));
 
-    // 4. 安装 ST7789 驱动
+    // 4. 安装 ST7789 驱动 (SPEC-005 第 3.0 节 & board-profile.json: 格式 RGB565, 顺序 RGB)
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = LCD_PIN_RST,
-        .rgb_endian = LCD_RGB_ENDIAN_BGR,
+        .rgb_endian = LCD_RGB_ENDIAN_RGB,
         .bits_per_pixel = 16,
     };
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(s_io_handle, &panel_config, &s_panel_handle));
@@ -110,7 +110,8 @@ void bsp_st7789_init(void) {
 
 void bsp_st7789_set_backlight(uint8_t brightness_pct) {
     if (brightness_pct > 100) brightness_pct = 100;
-    uint32_t duty = (brightness_pct * 255) / 100;
+    // AO3401 P-MOSFET 高边开关低电平导通，PWM 占空比反向映射 (SPEC-005 第 3.0 节)
+    uint32_t duty = 255 - ((brightness_pct * 255) / 100);
     ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
 }
@@ -132,11 +133,18 @@ void bsp_st7789_draw_bitmap(int x_start, int y_start, int x_end, int y_end, cons
     }
 }
 
+// ESP32-S3 是小端序 (Little-Endian)，SPI 发送 16-bit 像素数据时逐字节发送。
+// ST7789 控制器接收大端序 (Big-Endian，高字节在前)。写入缓冲区前进行字节交换。
+static inline uint16_t color_to_be(uint16_t c) {
+    return (uint16_t)((c >> 8) | (c << 8));
+}
+
 void bsp_st7789_fill(uint16_t color) {
     if (!s_panel_handle) return;
+    uint16_t be_color = color_to_be(color);
     static uint16_t __attribute__((aligned(4))) line_buf[LCD_WIDTH * 20];
     for (int i = 0; i < LCD_WIDTH * 20; i++) {
-        line_buf[i] = color;
+        line_buf[i] = be_color;
     }
     for (int y = 0; y < LCD_HEIGHT; y += 20) {
         bsp_st7789_draw_bitmap(0, y, LCD_WIDTH, y + 20, line_buf);
@@ -151,10 +159,11 @@ void bsp_st7789_fill_rect(int x, int y, int w, int h, uint16_t color) {
     if (y + h > LCD_HEIGHT) h = LCD_HEIGHT - y;
     if (w <= 0 || h <= 0) return;
 
+    uint16_t be_color = color_to_be(color);
     static uint16_t __attribute__((aligned(4))) s_chunk_buf[LCD_WIDTH * 16];
     int max_pixels = LCD_WIDTH * 16;
     for (int i = 0; i < max_pixels; i++) {
-        s_chunk_buf[i] = color;
+        s_chunk_buf[i] = be_color;
     }
 
     int cur_y = y;
@@ -172,12 +181,14 @@ void bsp_st7789_draw_glyph(int x, int y, uint32_t codepoint, uint16_t fg_color, 
     if (x < 0 || x + 8 > LCD_WIDTH || y < 0 || y + 8 > LCD_HEIGHT) return;
 
     const uint8_t *bitmap = font_get_glyph_8x8(codepoint);
+    uint16_t be_fg = color_to_be(fg_color);
+    uint16_t be_bg = color_to_be(bg_color);
     uint16_t __attribute__((aligned(4))) buf[64];
     for (int r = 0; r < 8; r++) {
         uint8_t row = bitmap[r];
         for (int c = 0; c < 8; c++) {
             bool set = (row & (1 << c)) != 0;
-            buf[r * 8 + c] = set ? fg_color : bg_color;
+            buf[r * 8 + c] = set ? be_fg : be_bg;
         }
     }
     bsp_st7789_draw_bitmap(x, y, x + 8, y + 8, buf);

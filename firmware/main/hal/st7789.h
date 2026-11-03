@@ -4,10 +4,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// ST7789 Pinout (实测 USB 小电视 S3 硬件板型 board-profile.json)
+// ST7789 Pinout (实测 USB 小电视 S3 硬件板型 SPEC-005 第 3.0 节 & board-profile.json)
 #define LCD_PIN_MOSI 1
 #define LCD_PIN_SCLK 18
-#define LCD_PIN_CS   21
+#define LCD_PIN_CS   -1
 #define LCD_PIN_DC   17
 #define LCD_PIN_RST  6
 #define LCD_PIN_BL   2
