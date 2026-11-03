@@ -17,8 +17,12 @@ idf_component_register(
     REQUIRES
         esp_timer
         esp_wifi
+        esp_netif
+        esp_event
         nvs_flash
         driver
         esp_lcd
         mqtt
+        json
+        lwip
 )

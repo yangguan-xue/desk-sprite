@@ -1,0 +1,52 @@
+menu "Desk Sprite Configuration"
+
+    config SPRITE_WIFI_SSID
+        string "Wi-Fi SSID"
+        default "myssid"
+        help
+            SSID of the Wi-Fi network to connect.
+
+    config SPRITE_WIFI_PASSWORD
+        string "Wi-Fi Password"
+        default "mypassword"
+        help
+            Password of the Wi-Fi network.
+
+    config SPRITE_MQTT_BROKER_URL
+        string "MQTT Broker URI"
+        default "mqtt://127.0.0.1:1883"
+        help
+            URI of the MQTT broker, e.g. mqtt://192.168.1.100:1883 or mqtts://...
+
+    config SPRITE_MQTT_USERNAME
+        string "MQTT Username"
+        default ""
+        help
+            MQTT Username for authentication.
+
+    config SPRITE_MQTT_PASSWORD
+        string "MQTT Password"
+        default ""
+        help
+            MQTT Password for authentication.
+
+    config SPRITE_DEVICE_ID
+        string "Device ID"
+        default "esp32_c049ef"
+        help
+            Unique device ID for Desk Sprite.
+
+    config SPRITE_SNTP_SERVER
+        string "SNTP Server"
+        default "pool.ntp.org"
+        help
+            SNTP server to sync clock.
+
+    config SPRITE_ENABLE_TOUCH_ACTIONS
+        bool "Enable Native Touch Action Reporting"
+        default n
+        help
+            Enable physical touch action reporting to cloud. Defaults to disabled
+            per SPEC-005/007 until physical capacitance calibration is accepted.
+
+endmenu

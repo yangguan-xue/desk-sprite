@@ -1,4 +1,5 @@
 #include "st7789.h"
+#include "font_utf8.h"
 #include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -105,5 +106,86 @@ void bsp_st7789_fill(uint16_t color) {
     }
     for (int y = 0; y < LCD_HEIGHT; y += 20) {
         esp_lcd_panel_draw_bitmap(s_panel_handle, 0, y, LCD_WIDTH, y + 20, line_buf);
+    }
+}
+
+void bsp_st7789_fill_rect(int x, int y, int w, int h, uint16_t color) {
+    if (!s_panel_handle) return;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > LCD_WIDTH) w = LCD_WIDTH - x;
+    if (y + h > LCD_HEIGHT) h = LCD_HEIGHT - y;
+    if (w <= 0 || h <= 0) return;
+
+    static uint16_t s_chunk_buf[LCD_WIDTH * 16];
+    int max_pixels = LCD_WIDTH * 16;
+    for (int i = 0; i < max_pixels; i++) {
+        s_chunk_buf[i] = color;
+    }
+
+    int cur_y = y;
+    int remaining_h = h;
+    while (remaining_h > 0) {
+        int lines = remaining_h > 16 ? 16 : remaining_h;
+        esp_lcd_panel_draw_bitmap(s_panel_handle, x, cur_y, x + w, cur_y + lines, s_chunk_buf);
+        cur_y += lines;
+        remaining_h -= lines;
+    }
+}
+
+void bsp_st7789_draw_glyph(int x, int y, uint32_t codepoint, uint16_t fg_color, uint16_t bg_color) {
+    if (!s_panel_handle) return;
+    if (x < 0 || x + 8 > LCD_WIDTH || y < 0 || y + 8 > LCD_HEIGHT) return;
+
+    const uint8_t *bitmap = font_get_glyph_8x8(codepoint);
+    uint16_t buf[64];
+    for (int r = 0; r < 8; r++) {
+        uint8_t row = bitmap[r];
+        for (int c = 0; c < 8; c++) {
+            bool set = (row & (1 << c)) != 0;
+            buf[r * 8 + c] = set ? fg_color : bg_color;
+        }
+    }
+    esp_lcd_panel_draw_bitmap(s_panel_handle, x, y, x + 8, y + 8, buf);
+}
+
+void bsp_st7789_draw_string(int x, int y, const char *str, uint16_t fg, uint16_t bg) {
+    if (!str || !s_panel_handle) return;
+    int cur_x = x;
+    const char *ptr = str;
+    while (*ptr && cur_x + 8 <= LCD_WIDTH) {
+        if (*ptr == '\n') break;
+        uint32_t cp = utf8_next_codepoint(&ptr);
+        if (cp == 0) break;
+        bsp_st7789_draw_glyph(cur_x, y, cp, fg, bg);
+        cur_x += 8;
+    }
+}
+
+void bsp_st7789_draw_string_wrapped(int x, int y, int max_w, int max_h, const char *str, uint16_t fg, uint16_t bg) {
+    if (!str || !s_panel_handle) return;
+    int cur_x = x;
+    int cur_y = y;
+    const char *ptr = str;
+    while (*ptr) {
+        if (*ptr == '\n') {
+            cur_x = x;
+            cur_y += 10;
+            ptr++;
+            if (cur_y + 8 > y + max_h) break;
+            continue;
+        }
+
+        if (cur_x + 8 > x + max_w) {
+            cur_x = x;
+            cur_y += 10;
+            if (cur_y + 8 > y + max_h) break;
+        }
+
+        uint32_t cp = utf8_next_codepoint(&ptr);
+        if (cp == 0) break;
+
+        bsp_st7789_draw_glyph(cur_x, cur_y, cp, fg, bg);
+        cur_x += 8;
     }
 }

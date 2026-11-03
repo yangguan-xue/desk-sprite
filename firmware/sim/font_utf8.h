@@ -175,4 +175,6 @@ static inline const uint8_t* sim_get_glyph(uint32_t cp) {
     return glyph_box_8x8;
 }
 
+#define font_get_glyph_8x8 sim_get_glyph
+
 #endif // FONT_UTF8_H
