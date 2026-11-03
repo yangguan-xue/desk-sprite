@@ -35,6 +35,8 @@ class SpriteConfig:
     api_key: str = "spr_live_test_key"
     mqtt_username: str = "host_macbook_pro"
     mqtt_password: str = "spr_mqtt_secret_test"
+    mqtt_tls_enabled: bool = False
+    mqtt_ca_certs: Optional[str] = None
     state_monitor: StateMonitorConfig = field(default_factory=StateMonitorConfig)
 
     @classmethod

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Desk Sprite Mac 守护进程入口脚本 (SPEC-004 第 3.2 节, TASK-012)"""
+"""Desk Sprite Mac 守护进程入口脚本 (SPEC-004 第 3.2 节, TASK-012, R04)"""
 
 import argparse
 import logging
@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from cli.sprite.config import SpriteConfig
+from cli.sprite.config import load_config
 from cli.sprite.daemon.app_monitor import AppMonitor
 from cli.sprite.daemon.command_executor import CommandExecutor
 from cli.sprite.daemon.mqtt_worker import DaemonMQTTWorker
@@ -52,21 +52,37 @@ def run_daemon():
         except Exception:
             pass
 
+    try:
+        config = load_config()
+    except Exception as e:
+        logger.error(f"Failed to load configuration: {e}")
+        sys.exit(1)
+
     pid = os.getpid()
     pid_file.write_text(str(pid))
-    pid_file.chmod(0o600)
+    try:
+        pid_file.chmod(0o600)
+    except Exception:
+        pass
 
-    config = SpriteConfig.load()
     executor = CommandExecutor(host_id=config.host_id)
     worker = DaemonMQTTWorker(config=config, executor=executor)
 
-    screen_mon = ScreenMonitor()
-
-    def handle_state_change(new_mode):
+    def handle_mode_change(new_mode):
         logger.info(f"State transition: -> {new_mode.value}")
         worker.publish_work_mode(new_mode.value)
 
-    app_mon = AppMonitor(on_state_change=handle_state_change)
+    app_mon = AppMonitor(on_mode_change=handle_mode_change)
+
+    def on_locked():
+        logger.info("Screen locked event received, transitioning to sleep immediately")
+        app_mon.set_screen_locked(True)
+
+    def on_unlocked():
+        logger.info("Screen unlocked event received, triggering refresh")
+        app_mon.set_screen_locked(False)
+
+    screen_mon = ScreenMonitor(on_locked=on_locked, on_unlocked=on_unlocked)
 
     # 优雅停机信号处理
     running = True
@@ -82,13 +98,14 @@ def run_daemon():
     try:
         logger.info(f"Starting Desk Sprite Daemon (PID: {pid}, Host: {config.host_id})...")
         worker.start()
+        screen_mon.start()
 
         while running:
-            is_locked = screen_mon.is_screen_locked()
-            app_mon.tick(screen_locked=is_locked)
+            app_mon.poll_tick()
             time.sleep(1.0)
     finally:
         logger.info("Cleaning up daemon resources...")
+        screen_mon.stop()
         worker.stop()
         if pid_file.exists():
             try:
@@ -108,29 +125,30 @@ def stop_daemon() -> int:
         pid = int(pid_file.read_text().strip())
     except Exception:
         pid_file.unlink(missing_ok=True)
-        print("Invalid PID file removed.")
+        print("Invalid PID file removed")
         return 0
 
     if not is_pid_running(pid):
-        print(f"Stale PID file (PID {pid} not running) removed.")
+        print(f"Daemon process {pid} is not running (stale PID file cleaned)")
         pid_file.unlink(missing_ok=True)
         return 0
 
-    print(f"Stopping daemon (PID {pid})...")
-    os.kill(pid, signal.SIGTERM)
+    print(f"Stopping daemon (PID: {pid})...")
+    try:
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(30):
+            time.sleep(0.1)
+            if not is_pid_running(pid):
+                break
+        else:
+            print("Force killing daemon...")
+            os.kill(pid, signal.SIGKILL)
+    except Exception as e:
+        print(f"Failed to kill daemon: {e}")
+        return 1
 
-    # 等待进程退出
-    for _ in range(50):
-        if not is_pid_running(pid):
-            break
-        time.sleep(0.1)
-
-    if is_pid_running(pid):
-        print("Daemon did not terminate gracefully, sending SIGKILL...")
-        os.kill(pid, signal.SIGKILL)
-        time.sleep(0.2)
-
-    pid_file.unlink(missing_ok=True)
+    if pid_file.exists():
+        pid_file.unlink(missing_ok=True)
     print("Daemon stopped.")
     return 0
 
@@ -144,7 +162,7 @@ def status_daemon() -> int:
     try:
         pid = int(pid_file.read_text().strip())
     except Exception:
-        print("Daemon is stopped (corrupt PID file)")
+        print("Corrupted PID file")
         return 1
 
     if is_pid_running(pid):
@@ -156,15 +174,15 @@ def status_daemon() -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="sprite-daemon", description="Desk Sprite Mac 守护进程管理")
-    parser.add_argument("command", choices=["run", "stop", "status"], help="动作")
+    parser = argparse.ArgumentParser(description="Desk Sprite Mac 守护进程管理")
+    parser.add_argument("action", choices=["run", "stop", "status"], help="动作")
     args = parser.parse_args()
 
-    if args.command == "run":
+    if args.action == "run":
         run_daemon()
-    elif args.command == "stop":
+    elif args.action == "stop":
         sys.exit(stop_daemon())
-    elif args.command == "status":
+    elif args.action == "status":
         sys.exit(status_daemon())
 
 

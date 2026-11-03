@@ -39,3 +39,9 @@ firmware/sdkconfig
 firmware/sdkconfig.old
 firmware/sim/desk_sprite_sim
 
+# Certificates
+cloud/deploy/mosquitto/certs/
+*.key
+*.csr
+*.crt
+

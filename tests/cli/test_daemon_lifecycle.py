@@ -84,3 +84,48 @@ def test_daemon_run_pid_lock_and_stop(clean_daemon_env):
     # 验证原进程已死亡
     proc.poll()
     assert proc.returncode is not None or not os.path.exists(f"/proc/{proc.pid}")
+
+
+from cli.sprite.config import SpriteConfig, save_config
+
+
+def test_daemon_real_run_startup_and_sigterm(clean_daemon_env):
+    """R04 验证: 真实执行 sprite-daemon run，不再抛出 AttributeError，并响应 SIGTERM 优雅退出"""
+    config_file = clean_daemon_env / "config.json"
+    cfg = SpriteConfig(
+        host_id="test_mac",
+        cloud_endpoint="http://127.0.0.1:8000",
+        mqtt_broker="127.0.0.1",
+        mqtt_port=1883,
+        mqtt_username="host_test_mac",
+        mqtt_password="secret_password",
+    )
+    save_config(cfg, config_file)
+
+    env = os.environ.copy()
+    env["HOME"] = str(clean_daemon_env.parent)
+    env["PYTHONPATH"] = "."
+
+    proc = subprocess.Popen(
+        [sys.executable, "cli/bin/sprite-daemon", "run"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    try:
+        pid_file = clean_daemon_env / "daemon.pid"
+        for _ in range(30):
+            if pid_file.exists():
+                break
+            time.sleep(0.1)
+        assert pid_file.exists()
+
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=3.0)
+        assert proc.returncode == 0
+        assert not pid_file.exists()
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+

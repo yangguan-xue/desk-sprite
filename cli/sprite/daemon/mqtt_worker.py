@@ -42,6 +42,16 @@ class DaemonMQTTWorker:
         if config.mqtt_username:
             self.client.username_pw_set(config.mqtt_username, config.mqtt_password)
 
+        # TLS 证书与加密连接支持 (SPEC-001, SPEC-004 第 4.1 节, R08)
+        if config.mqtt_port == 8883 or getattr(config, "mqtt_tls_enabled", False):
+            import os
+            import ssl
+            ca_certs = getattr(config, "mqtt_ca_certs", None)
+            if ca_certs and os.path.exists(ca_certs):
+                self.client.tls_set(ca_certs=ca_certs)
+            else:
+                self.client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+
         self._setup_lwt()
         self.client.on_connect = self._on_connect
         self.client.on_message = self._on_message
