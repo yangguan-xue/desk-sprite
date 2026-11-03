@@ -97,6 +97,16 @@ static void test_action_reporter_payload_serialization() {
     printf("[PASS] test_action_reporter_payload_serialization\n");
 }
 
+// 模拟 ESP-IDF lwIP esp_sntp 底层读取即重置行为 (R6-01)
+static int s_mock_sntp_status = 0; // 0: RESET, 1: COMPLETED, 2: IN_PROGRESS
+static int mock_esp_sntp_get_sync_status(void) {
+    int cur = s_mock_sntp_status;
+    if (s_mock_sntp_status == 1) {
+        s_mock_sntp_status = 0; // 读取后立即重置为 RESET (0)
+    }
+    return cur;
+}
+
 static void test_touch_action_sntp_sync_guard() {
     alert_scheduler_t sched;
     alert_scheduler_init(&sched);
@@ -170,6 +180,114 @@ static void test_touch_action_sntp_sync_guard() {
     printf("[PASS] test_touch_action_sntp_sync_guard\n");
 }
 
+static void test_touch_action_sntp_continuous_alerts_and_retry() {
+    sntp_sync_tracker_t tracker;
+    sntp_sync_tracker_init(&tracker);
+
+    alert_scheduler_t sched;
+    alert_scheduler_init(&sched);
+
+    char action_json[512] = {0};
+
+    // -------------------------------------------------------------
+    // 步骤 1: 开机未校时阶段 (unix_now=50s, 底层状态 RESET=0)
+    // -------------------------------------------------------------
+    s_mock_sntp_status = 0;
+    bool synced_boot = sntp_sync_tracker_eval(&tracker, mock_esp_sntp_get_sync_status(), 50LL);
+    assert(!synced_boot);
+
+    alert_payload_t alert1 = { .priority = PRIORITY_HIGH, .duration_sec = 10, .sound = SOUND_DING };
+    strncpy(alert1.event_id, "evt_high_1", sizeof(alert1.event_id) - 1);
+    assert(alert_scheduler_push(&sched, &alert1, WORK_MODE_IDLE) > 0);
+
+    touch_alert_action_result_t res_boot = touch_action_handle_tap(
+        &sched, "esp32_c049ef", synced_boot, 50LL, true, WORK_MODE_IDLE, action_json, sizeof(action_json)
+    );
+    assert(res_boot == TOUCH_ALERT_ACT_BLOCKED_UNSYNCED);
+    assert(alert_scheduler_get_active(&sched) != NULL); // 告警必须保留
+
+    // -------------------------------------------------------------
+    // 步骤 2: SNTP 异步校时成功一次 (COMPLETED=1, unix_now=1700000050)
+    // -------------------------------------------------------------
+    s_mock_sntp_status = 1; // 底层进入 COMPLETED
+    long long now_t1 = 1700000050LL;
+    bool synced_t1 = sntp_sync_tracker_eval(&tracker, mock_esp_sntp_get_sync_status(), now_t1);
+    assert(synced_t1); // 成功识别校时
+    assert(s_mock_sntp_status == 0); // 确认底层读取后已重置为 RESET (0)
+
+    // 点击第一条告警 -> 动作成功发出并消除告警 1
+    action_json[0] = '\0';
+    touch_alert_action_result_t res_act1 = touch_action_handle_tap(
+        &sched, "esp32_c049ef", synced_t1, now_t1, true, WORK_MODE_IDLE, action_json, sizeof(action_json)
+    );
+    assert(res_act1 == TOUCH_ALERT_ACT_DISMISSED_SENT);
+    assert(alert_scheduler_get_active(&sched) == NULL);
+    assert(strstr(action_json, "\"active_alert_id\":\"evt_high_1\"") != NULL);
+
+    // -------------------------------------------------------------
+    // 步骤 3: 连续第二条告警到达 (R6-01: 底层状态为 RESET=0，但时钟依然校准有效)
+    // -------------------------------------------------------------
+    alert_payload_t alert2 = { .priority = PRIORITY_HIGH, .duration_sec = 10, .sound = SOUND_DING };
+    strncpy(alert2.event_id, "evt_high_2", sizeof(alert2.event_id) - 1);
+    assert(alert_scheduler_push(&sched, &alert2, WORK_MODE_IDLE) > 0);
+
+    long long now_t2 = 1700000100LL;
+    // 此时 mock_esp_sntp_get_sync_status() 依然返回 RESET (0)，且无新同步
+    bool synced_t2 = sntp_sync_tracker_eval(&tracker, mock_esp_sntp_get_sync_status(), now_t2);
+    assert(synced_t2); // 必须依托 tracker 缓存持久判定为有效，绝不可返回 false (R6-01)
+
+    action_json[0] = '\0';
+    touch_alert_action_result_t res_act2 = touch_action_handle_tap(
+        &sched, "esp32_c049ef", synced_t2, now_t2, true, WORK_MODE_IDLE, action_json, sizeof(action_json)
+    );
+    assert(res_act2 == TOUCH_ALERT_ACT_DISMISSED_SENT); // 连续点击必须成功放行
+    assert(alert_scheduler_get_active(&sched) == NULL);
+    assert(strstr(action_json, "\"active_alert_id\":\"evt_high_2\"") != NULL);
+
+    // -------------------------------------------------------------
+    // 步骤 4: 离线点击后恢复连接再重试 (R6-01: 离线先拦截保留，联网后重试成功)
+    // -------------------------------------------------------------
+    alert_payload_t alert3 = { .priority = PRIORITY_HIGH, .duration_sec = 10, .sound = SOUND_DING };
+    strncpy(alert3.event_id, "evt_high_3", sizeof(alert3.event_id) - 1);
+    assert(alert_scheduler_push(&sched, &alert3, WORK_MODE_IDLE) > 0);
+
+    long long now_t3 = 1700000200LL;
+    bool synced_t3 = sntp_sync_tracker_eval(&tracker, mock_esp_sntp_get_sync_status(), now_t3);
+    assert(synced_t3);
+
+    // 4.1 处于离线状态下点击
+    action_json[0] = '\0';
+    touch_alert_action_result_t res_offline = touch_action_handle_tap(
+        &sched, "esp32_c049ef", synced_t3, now_t3, false /* mqtt offline */, WORK_MODE_IDLE, action_json, sizeof(action_json)
+    );
+    assert(res_offline == TOUCH_ALERT_ACT_BLOCKED_OFFLINE);
+    assert(alert_scheduler_get_active(&sched) != NULL); // 告警 3 依然保留
+
+    // 4.2 网络恢复后再次点击重试
+    long long now_t4 = 1700000205LL;
+    bool synced_t4 = sntp_sync_tracker_eval(&tracker, mock_esp_sntp_get_sync_status(), now_t4);
+    assert(synced_t4);
+
+    action_json[0] = '\0';
+    touch_alert_action_result_t res_retry = touch_action_handle_tap(
+        &sched, "esp32_c049ef", synced_t4, now_t4, true /* mqtt reconnected */, WORK_MODE_IDLE, action_json, sizeof(action_json)
+    );
+    assert(res_retry == TOUCH_ALERT_ACT_DISMISSED_SENT); // 重试放行
+    assert(alert_scheduler_get_active(&sched) == NULL);
+    assert(strstr(action_json, "\"active_alert_id\":\"evt_high_3\"") != NULL);
+
+    // -------------------------------------------------------------
+    // 步骤 5: 验证通知回调触发路径 (time_sync_notification_cb 机制)
+    // -------------------------------------------------------------
+    sntp_sync_tracker_t tracker_cb;
+    sntp_sync_tracker_init(&tracker_cb);
+    assert(!sntp_sync_tracker_eval(&tracker_cb, 0, 1700000300LL));
+    sntp_sync_tracker_notify_synced(&tracker_cb);
+    assert(sntp_sync_tracker_eval(&tracker_cb, 0, 1700000300LL));
+
+    printf("[PASS] test_touch_action_sntp_continuous_alerts_and_retry\n");
+}
+
 int main(void) {
     printf("Running test_touch_gestures...\n");
     test_touch_jitter_debounce();
@@ -177,6 +295,7 @@ int main(void) {
     test_touch_long_press_detection();
     test_action_reporter_payload_serialization();
     test_touch_action_sntp_sync_guard();
+    test_touch_action_sntp_continuous_alerts_and_retry();
     printf("All test_touch_gestures tests passed successfully!\n");
     return 0;
 }

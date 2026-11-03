@@ -81,6 +81,7 @@ static ui_metrics_render_model_t s_metrics_model;
 static bool s_has_metrics = false;
 static char s_last_played_event_id[64] = {0};
 static mqtt_reassembler_t s_mqtt_reassembler;
+static sntp_sync_tracker_t s_time_sync_tracker;
 
 // 前向声明
 static void wifi_init_sta(void);
@@ -326,6 +327,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+static void time_sync_notification_cb(struct timeval *tv) {
+    (void)tv;
+    sntp_sync_tracker_notify_synced(&s_time_sync_tracker);
+    ESP_LOGI(TAG, "SNTP synchronized successfully, system time is now calibrated");
+}
+
 static void sync_time_via_sntp(void) {
     static bool s_sntp_initialized = false;
     if (!s_sntp_initialized) {
@@ -333,6 +340,7 @@ static void sync_time_via_sntp(void) {
         esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
         esp_sntp_setservername(0, CONFIG_SPRITE_SNTP_SERVER);
         esp_sntp_setservername(1, "time.apple.com");
+        esp_sntp_set_time_sync_notification_cb(time_sync_notification_cb);
         esp_sntp_init();
         s_sntp_initialized = true;
     }
@@ -340,10 +348,11 @@ static void sync_time_via_sntp(void) {
 
 static bool __attribute__((unused)) is_time_synced(void) {
     time_t now = time(NULL);
-    if (now < 1700000000LL) {
-        return false;
-    }
-    return (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED);
+    return sntp_sync_tracker_eval(
+        &s_time_sync_tracker,
+        (int)esp_sntp_get_sync_status(),
+        (long long)now
+    );
 }
 
 static void wifi_init_sta(void) {
@@ -789,6 +798,7 @@ void app_main(void) {
     alert_scheduler_init(&s_alert_sched);
     touch_button_init(&s_touch_button);
     mqtt_reassembler_init(&s_mqtt_reassembler);
+    sntp_sync_tracker_init(&s_time_sync_tracker);
     bsp_st7789_set_backlight(80);
 
     // 播报开机提示音

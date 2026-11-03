@@ -1,6 +1,35 @@
 #include "touch_action.h"
 #include <string.h>
 
+void sntp_sync_tracker_init(sntp_sync_tracker_t* tracker) {
+    if (tracker) {
+        tracker->has_synced = false;
+    }
+}
+
+void sntp_sync_tracker_notify_synced(sntp_sync_tracker_t* tracker) {
+    if (tracker) {
+        tracker->has_synced = true;
+    }
+}
+
+bool sntp_sync_tracker_eval(sntp_sync_tracker_t* tracker, int sntp_sync_status, long long unix_now) {
+    if (!tracker) {
+        return false;
+    }
+    // 1. 系统时间必须满足基础合理性（>= 2023-11-14 00:00:00 UTC，防止未校时开机时间戳被判有效）
+    if (unix_now < 1700000000LL) {
+        return false;
+    }
+    // 2. 捕获并持久化 SNTP_SYNC_STATUS_COMPLETED (1) 状态
+    // ESP-IDF/lwIP sntp_get_sync_status() 读取 COMPLETED 状态后会重置底层状态为 RESET (0)
+    // 必须在此处记录有效标记，防止连续点击或后续告警因状态被重置而被误拦截 (R6-01)
+    if (sntp_sync_status == 1) {
+        tracker->has_synced = true;
+    }
+    return tracker->has_synced;
+}
+
 touch_alert_action_result_t touch_action_handle_tap(
     alert_scheduler_t* sched,
     const char* device_id,

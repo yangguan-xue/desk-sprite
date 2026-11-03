@@ -19,6 +19,15 @@ typedef enum {
     TOUCH_ALERT_ACT_ERROR = -1
 } touch_alert_action_result_t;
 
+// SNTP 时钟同步状态监视器 (R6-01: 解决 ESP-IDF/lwIP 读取 COMPLETED 状态后立即重置为 RESET 导致后续动作被拦截的问题)
+typedef struct {
+    bool has_synced;
+} sntp_sync_tracker_t;
+
+void sntp_sync_tracker_init(sntp_sync_tracker_t* tracker);
+void sntp_sync_tracker_notify_synced(sntp_sync_tracker_t* tracker);
+bool sntp_sync_tracker_eval(sntp_sync_tracker_t* tracker, int sntp_sync_status, long long unix_now);
+
 // 处理轻触告警弹窗并决定是否上报动作 (R5-04: 受时钟同步与连接状态强约束)
 touch_alert_action_result_t touch_action_handle_tap(
     alert_scheduler_t* sched,
