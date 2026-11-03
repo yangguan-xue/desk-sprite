@@ -17,5 +17,7 @@
 
 void bsp_st7789_init(void);
 void bsp_st7789_set_backlight(uint8_t brightness_pct);
+void bsp_st7789_fill(uint16_t color);
+void bsp_st7789_draw_bitmap(int x_start, int y_start, int x_end, int y_end, const void *color_data);
 
 #endif // HAL_ST7789_H

@@ -72,12 +72,20 @@ static void on_state(work_mode_t mode) {
 int main(int argc, char* argv[]) {
     bool headless = false;
     bool run_once = false;
+    const char* broker_host = getenv("MQTT_HOST") ? getenv("MQTT_HOST") : "127.0.0.1";
+    int broker_port = getenv("MQTT_PORT") ? atoi(getenv("MQTT_PORT")) : 1883;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--headless") == 0 || strcmp(argv[i], "-h") == 0) {
             headless = true;
         }
         if (strcmp(argv[i], "--once") == 0) {
             run_once = true;
+        }
+        if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            broker_port = atoi(argv[++i]);
+        }
+        if (strcmp(argv[i], "--host") == 0 && i + 1 < argc) {
+            broker_host = argv[++i];
         }
     }
 
@@ -126,8 +134,8 @@ int main(int argc, char* argv[]) {
     g_has_metrics = true;
 
     sim_mqtt_config_t mqtt_cfg = {
-        .broker_host = "127.0.0.1",
-        .broker_port = 1883,
+        .broker_host = broker_host,
+        .broker_port = broker_port,
         .device_id = "esp32_c049ef",
         .username = "sprite_device",
         .password = "device_secret",

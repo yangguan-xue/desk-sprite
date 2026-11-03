@@ -22,8 +22,17 @@ endif
 
 # 检测是否有 mosquitto
 MOSQ_LIBS := $(shell pkg-config --libs libmosquitto 2>/dev/null)
+ifeq ($(MOSQ_LIBS),)
+ifneq ($(wildcard /opt/homebrew/include/mosquitto.h),)
+MOSQ_CFLAGS := -I/opt/homebrew/include -DHAS_MOSQUITTO
+MOSQ_LIBS := -L/opt/homebrew/lib -lmosquitto
+endif
+else
+MOSQ_CFLAGS := -DHAS_MOSQUITTO
+endif
+
 ifneq ($(MOSQ_LIBS),)
-CFLAGS += -DHAS_MOSQUITTO
+CFLAGS += $(MOSQ_CFLAGS)
 LDFLAGS += $(MOSQ_LIBS)
 endif
 

@@ -19,5 +19,6 @@ idf_component_register(
         esp_wifi
         nvs_flash
         driver
+        esp_lcd
         mqtt
 )
