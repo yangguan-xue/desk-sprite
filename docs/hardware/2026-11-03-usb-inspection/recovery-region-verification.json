@@ -1,0 +1,37 @@
+{
+  "boot_and_partition": {
+    "start": "0x0",
+    "length": 36864,
+    "matches_recovery_image": true
+  },
+  "nvs": {
+    "start": "0x9000",
+    "length": 20480,
+    "matches_recovery_image": false
+  },
+  "otadata": {
+    "start": "0xe000",
+    "length": 8192,
+    "matches_recovery_image": true
+  },
+  "application": {
+    "start": "0x10000",
+    "length": 3145728,
+    "matches_recovery_image": true
+  },
+  "spiffs": {
+    "start": "0x310000",
+    "length": 917504,
+    "matches_recovery_image": true
+  },
+  "coredump": {
+    "start": "0x3f0000",
+    "length": 65536,
+    "matches_recovery_image": true
+  },
+  "unused_tail": {
+    "start": "0x400000",
+    "length": 4194304,
+    "matches_recovery_image": true
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-03",
+  "gpio": 5,
+  "touch_channel": 5,
+  "sample_count": 600,
+  "read_errors": 0,
+  "raw_min": 16332,
+  "raw_max": 16400,
+  "raw_span_relative_to_idle_mean_percent": 0.4152,
+  "first_5_seconds": {
+    "sample_count": 51,
+    "raw_min": 16362,
+    "raw_max": 16389,
+    "mean": 16377.2745
+  },
+  "user_report": {
+    "completed_three_top_touches": true,
+    "returned_to_kimi_dashboard": true
+  },
+  "interaction_validation_passed": false,
+  "interpretation": "Raw capacitance reads completed; small variations have not established a repeatable separation between idle and the three touches. No product threshold or gesture validation inferred.",
+  "evidence": "ram-probe-native-touch-result.json"
+}

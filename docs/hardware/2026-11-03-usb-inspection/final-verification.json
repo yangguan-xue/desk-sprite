@@ -1,0 +1,35 @@
+{
+  "regions": [
+    {
+      "name": "boot",
+      "matches_restored_kimi_image": true
+    },
+    {
+      "name": "partitions",
+      "matches_restored_kimi_image": true
+    },
+    {
+      "name": "otadata",
+      "matches_restored_kimi_image": true
+    },
+    {
+      "name": "app",
+      "matches_restored_kimi_image": true
+    },
+    {
+      "name": "resources",
+      "matches_restored_kimi_image": true
+    }
+  ],
+  "nvs_trial_rolled_back": true,
+  "reset_to_flash": true,
+  "serial_closed": true,
+  "monitor": {
+    "seconds": 65.2,
+    "bytes": 20,
+    "rom_boot_markers": 0,
+    "panic_marker": false,
+    "brownout_marker": false,
+    "reset_lines": []
+  }
+}

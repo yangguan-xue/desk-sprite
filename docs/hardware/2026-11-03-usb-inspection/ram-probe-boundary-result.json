@@ -1,0 +1,46 @@
+{
+  "image_sha256": "bc48ff7cf237e16b06e2f5bdb00fceddf4b07e31dbae1393f12072f2b83b297d",
+  "transport": "ROM RAM loader; no Flash write commands",
+  "lines": [
+    "PROBE ram_only start reset_reason=0",
+    "PROBE codec_reg=0xfd value=0x83 result=0",
+    "PROBE codec_reg=0xfe value=0x11 result=0",
+    "PROBE codec_reg=0xff value=0x00 result=0",
+    "PROBE audio_identity_only no_repeat_tone",
+    "PROBE display_pattern=rgb_8px_white_frame_bottom_magenta_cyan_yellow_white spi_mode=3 spi_hz=27000000 backlight_raw=205",
+    "PROBE passive_input_enabled_mask=0x0001e60000207e09",
+    "PROBE passive_gpio t_ms=0 levels=0x0000000000000001 changed=0x0000000000000000",
+    "PROBE alive seconds=0 heap=286620 audio=ok",
+    "PROBE alive seconds=1 heap=286620 audio=ok",
+    "PROBE alive seconds=2 heap=286620 audio=ok",
+    "PROBE alive seconds=3 heap=286620 audio=ok",
+    "PROBE alive seconds=4 heap=286620 audio=ok",
+    "PROBE alive seconds=5 heap=286620 audio=ok",
+    "PROBE alive seconds=6 heap=286620 audio=ok",
+    "PROBE alive seconds=7 heap=286620 audio=ok",
+    "PROBE alive seconds=8 heap=286620 audio=ok",
+    "PROBE alive seconds=9 heap=286620 audio=ok",
+    "PROBE alive seconds=10 heap=286620 audio=ok",
+    "PROBE alive seconds=11 heap=286620 audio=ok",
+    "PROBE alive seconds=12 heap=286620 audio=ok",
+    "PROBE alive seconds=13 heap=286620 audio=ok",
+    "PROBE alive seconds=14 heap=286620 audio=ok",
+    "PROBE alive seconds=15 heap=286620 audio=ok"
+  ],
+  "serial_closed": true,
+  "hard_reset_command_completed": true,
+  "probe_complete": false,
+  "flash_application_start_verified": true,
+  "probe_error": {
+    "type": "SerialException",
+    "message": "read failed: [Errno 6] Device not configured"
+  },
+  "interruption": "USB disconnected after last alive seconds=15; before normal 60-second completion",
+  "user_observation": {
+    "quote": "等一下，刚刚我动到了线，现在是kimi",
+    "kimi_dashboard_visible": true,
+    "boundary_test_accepted": false,
+    "three_touches_confirmed": false
+  },
+  "reset_verification_note": "Reset method returned, which does not prove device restart. Kimi startup is confirmed separately by user observation."
+}

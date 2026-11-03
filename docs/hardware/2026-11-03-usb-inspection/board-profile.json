@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-03",
+  "identity": {
+    "chip": "ESP32-S3",
+    "revision": "v0.2",
+    "flash_bytes": 8388608,
+    "psram_bytes": 8388608,
+    "commercial_model": null
+  },
+  "display": {
+    "driver_family": "ST7789-compatible",
+    "exact_controller_suffix": null,
+    "width": 240,
+    "height": 240,
+    "format": "RGB565",
+    "rgb_order": "RGB",
+    "spi_mode": 3,
+    "spi_hz": 27000000,
+    "pins": {
+      "mosi": 1,
+      "sclk": 18,
+      "dc": 17,
+      "reset": 6,
+      "backlight": 2,
+      "software_cs": -1,
+      "miso": -1
+    },
+    "physical_cs_wiring": null,
+    "reference_rotation_0_offset": {
+      "x": 0,
+      "y": 0
+    },
+    "backlight_test": {
+      "frequency_hz": 5000,
+      "resolution_bits": 8,
+      "raw_duty": 205
+    },
+    "status": "RGB stripes, four bottom color bands and coarse white borders observed in user photo; exact single-pixel extent and other rotations unverified",
+    "physical_inches": null,
+    "boundary_evidence": "display-boundary-observed.jpg",
+    "backlight_circuit": {
+      "part": "AO3401",
+      "type": "P-channel high-side switch",
+      "active_level_schematic": 0,
+      "pwm_inverted_schematic": true,
+      "polarity_empirically_verified": false,
+      "source": "seller-materials-review.md"
+    },
+    "fpc_pin_nets_schematic": {
+      "1": "GND",
+      "2": "AO3401 switched 3V3",
+      "3": "GND",
+      "4": "3V3",
+      "5": "LCD_RESET",
+      "6": "LCD_SDA",
+      "7": "LCD_SCL",
+      "8": "GND",
+      "9": "LCD_DC",
+      "10": "GND",
+      "11": "GND",
+      "12": "GND"
+    },
+    "panel_part_number_status": "H12-07 and C12-01 specification pin orders differ from the board schematic; exact panel unmatched."
+  },
+  "audio": {
+    "codec": "ES8311",
+    "i2c_address": 24,
+    "i2c_hz": 100000,
+    "identity_registers": {
+      "0xfd": 131,
+      "0xfe": 17,
+      "0xff": 0
+    },
+    "pins": {
+      "sda": 40,
+      "scl": 39,
+      "mclk": 38,
+      "bclk": 16,
+      "ws": 7,
+      "dout": 4,
+      "pa_enable": 8,
+      "din_schematic": 15
+    },
+    "pa_active_level": 1,
+    "pa_part_number": "NS4150B (seller S3 schematic; package marking unverified)",
+    "sample_rate_hz": 16000,
+    "bits": 16,
+    "channels": 2,
+    "mclk_hz": 4096000,
+    "status": "identity read and low-amplitude 880Hz single tone heard by user",
+    "microphone": {
+      "part_schematic": "GMI4015P-2C-42db",
+      "path_schematic": "analog microphone to ES8311 MIC1P/MIC1N; ASDOUT to MCU GPIO15",
+      "recording_verified": false,
+      "physical_part_verified": false
+    },
+    "speaker_impedance_ohms": null,
+    "speaker_power_watts": null,
+    "test_tone": {
+      "frequency_hz": 880,
+      "pcm_peak": 1200,
+      "pcm_full_scale": 32767,
+      "note": "Legacy diagnostic log volume=20 is a label, not measured loudness or PCM amplitude percent."
+    },
+    "speaker_part_schematic": "FS-2308"
+  },
+  "input": {
+    "touch_count_user_reported": 1,
+    "touch_gpio": 5,
+    "touch_chip": "ESP32-S3 native capacitive touch (schematic electrode direct to IO5; interaction unverified)",
+    "enabled_for_product": false,
+    "reserved_audio_gpio_not_touch": 4,
+    "unconfirmed_pulse_gpios": [
+      3,
+      9
+    ],
+    "pulse_note": "One simultaneous 300ms pulse in passive readout; no repeatable association with three reported touches.",
+    "touch_location_user_reported": "top of enclosure",
+    "confirmed_sequence_passive_result": "Three 2-second touches reported complete; no digital changes detected.",
+    "touch_channel": 5,
+    "wiring_source": "seller-materials-review.md",
+    "native_measurement": {
+      "sample_count": 600,
+      "read_errors": 0,
+      "raw_min": 16332,
+      "raw_max": 16400,
+      "user_confirmed_three_touches": true,
+      "repeatable_press_release_validated": false,
+      "assessment": "native-touch-assessment.json"
+    }
+  },
+  "current_firmware": {
+    "name": "Kimi dashboard / SDD MONO 0.2.6-dev",
+    "flash_app_offset": 65536,
+    "flash_app_partition_bytes": 3145728,
+    "network_verified": false
+  },
+  "open_gates": [
+    "display single-pixel extent and other rotations",
+    "GPIO5 touch sensitivity, repeatable interaction and gestures",
+    "USB/power contact stability",
+    "network and live quota validation",
+    "microphone recording (GPIO15 schematic only)",
+    "backlight brightness curve and sleep/wake"
+  ],
+  "evidence": [
+    "board-validation.md",
+    "ram-probe-mode3-result.json",
+    "source-image-match.json",
+    "final-verification.json",
+    "ram-probe-boundary-retry-result.json",
+    "display-boundary-observed.jpg",
+    "ram-probe-touch-repeat-result.json",
+    "ram-probe-touch-coordinated-result.json",
+    "seller-materials-review.md",
+    "seller-materials-manifest.json",
+    "ram-probe-native-touch-result.json",
+    "native-touch-assessment.json"
+  ],
+  "connection_observation": {
+    "completed_ram_trials_after_reconnect": 3,
+    "seconds_each": 60,
+    "disconnects": 0,
+    "long_term_stability_verified": false,
+    "additional_native_touch_trial_seconds": 60,
+    "additional_trial_disconnects": 0,
+    "latest_application_recovery_user_verified": true
+  },
+  "power_schematic": {
+    "connector": "USB Type-C 16 pin",
+    "input_rail_volts": 5,
+    "logic_rail_volts": 3.3,
+    "regulator_labels": [
+      "ME6217C33M5G",
+      "AMS1117-3.3"
+    ],
+    "battery_or_charger_drawn": false,
+    "physical_bom_verified": false,
+    "measured_power_watts": null
+  }
+}

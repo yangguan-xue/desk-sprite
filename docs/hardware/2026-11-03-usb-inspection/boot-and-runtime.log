@@ -1,0 +1,92 @@
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x29 (SPI_FAST_FLASH_BOOT)
+Saved PC:0x403ce6e7
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce3818,len:0x1750
+load:0x403c9700,len:0x4
+load:0x403c9704,len:0xc00
+load:0x403cc700,len:0x2e04
+entry 0x403c9908
+I (26) boot: ESP-IDF v5.1.2 2nd stage bootloader
+I (27) boot: compile time Nov  3 2026 12:54:08
+I (27) boot: Multicore bootloader
+I (30) boot: chip revision: v0.2
+I (34) boot.esp32s3: Boot SPI Speed : 80MHz
+I (38) boot.esp32s3: SPI Mode       : DIO
+I (43) boot.esp32s3: SPI Flash Size : 8MB
+I (48) boot: Enabling RNG early entropy source...
+I (53) boot: Partition Table:
+I (57) boot: ## Label            Usage          Type ST Offset   Length
+I (64) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (72) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (79) boot:  2 factory          factory app      00 00 00010000 00100000
+I (87) boot: End of partition table
+I (91) esp_image: segment 0: paddr=00010020 vaddr=3c020020 size=0d2e8h ( 53992) map
+I (109) esp_image: segment 1: paddr=0001d310 vaddr=3fc94600 size=02d08h ( 11528) load
+I (112) esp_image: segment 2: paddr=00020020 vaddr=42000020 size=1e3a0h (123808) map
+I (138) esp_image: segment 3: paddr=0003e3c8 vaddr=3fc97308 size=000bch (   188) load
+I (139) esp_image: segment 4: paddr=0003e48c vaddr=40374000 size=1053ch ( 66876) load
+I (166) boot: Loaded app from partition at offset 0x10000
+I (166) boot: Disabling RNG early entropy source...
+I (177) cpu_start: Multicore app
+I (178) octal_psram: vendor id    : 0x0d (AP)
+I (178) octal_psram: dev id       : 0x02 (generation 3)
+I (181) octal_psram: density      : 0x03 (64 Mbit)
+I (186) octal_psram: good-die     : 0x01 (Pass)
+I (191) octal_psram: Latency      : 0x01 (Fixed)
+I (197) octal_psram: VCC          : 0x01 (3V)
+I (202) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (208) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (213) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (219) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (225) octal_psram: DriveStrength: 0x00 (1/1)
+I (231) MSPI Timing: PSRAM timing tuning index: 4
+I (236) esp_psram: Found 8MB PSRAM device
+I (240) esp_psram: Speed: 80MHz
+I (244) cpu_start: Pro cpu up.
+I (248) cpu_start: Starting app cpu, entry point is 0x403754cc
+I (0) cpu_start: App cpu up.
+I (700) esp_psram: SPI SRAM memory test OK
+I (709) cpu_start: Pro cpu start user code
+I (709) cpu_start: cpu freq: 240000000 Hz
+I (709) cpu_start: Application information:
+I (712) cpu_start: Project name:     desk_sprite
+I (718) cpu_start: App version:      12c63ba-dirty
+I (723) cpu_start: Compile time:     Nov  3 2026 13:46:29
+I (729) cpu_start: ELF file SHA256:  2355572d2a634060...
+I (735) cpu_start: ESP-IDF:          v5.1.2
+I (740) cpu_start: Min chip rev:     v0.0
+I (745) cpu_start: Max chip rev:     v0.99 
+I (750) cpu_start: Chip rev:         v0.2
+I (754) heap_init: Initializing. RAM available for dynamic allocation:
+I (762) heap_init: At 3FC9A508 len 0004F208 (316 KiB): DRAM
+I (768) heap_init: At 3FCE9710 len 00005724 (21 KiB): STACK/DRAM
+I (774) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (781) heap_init: At 600FE010 len 00001FD8 (7 KiB): RTCRAM
+I (787) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (795) spi_flash: detected chip: gd
+I (799) spi_flash: flash io: dio
+I (803) sleep: Configure to isolate all GPIO pins in sleep state
+I (809) sleep: Enable automatic switching of GPIO sleep configuration
+I (817) app_start: Starting scheduler on CPU0
+I (821) app_start: Starting scheduler on CPU1
+I (821) main_task: Started on CPU0
+I (831) esp_psram: Reserving pool of 32K of internal memory for DMA/internal allocations
+I (839) main_task: Calling app_main()
+===========================================
+  Desk Sprite ESP32-S3 Firmware v1.4.0    
+===========================================
+I (855) HAL_ST7789: Initializing ST7789 LCD (MOSI=39, SCLK=38, CS=21, DC=45, RST=40, BL=46)
+I (865) gpio: GPIO[45]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
+I (874) gpio: GPIO[40]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
+I (1046) HAL_ST7789: ST7789 initialized and screen filled with RED (0xF800)
+I (1047) gpio: GPIO[47]| InputEn: 0| OutputEn: 1| OpenDrain: 0| Pullup: 0| Pulldown: 0| Intr:0 
+I (1053) HAL_ES8311: Initialized Audio HAL (BCLK=15, LRCK=16, SDOUT=17, PA_EN=47)
+I (1061) gpio: GPIO[4]| InputEn: 1| OutputEn: 0| OpenDrain: 0| Pullup: 0| Pulldown: 1| Intr:0 
+I (1070) HAL_TTP223: Configured touch button input on GPIO 4
+[System] Desk Sprite ESP32-S3 firmware initialized successfully.
+[Screen Test] Ticked 0, filled color: RED
+[Screen Test] Ticked 1, filled color: GREEN
+[Screen Test] Ticked 2, filled color: BLUE

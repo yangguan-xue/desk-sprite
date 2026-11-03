@@ -1,5 +1,7 @@
 # SPEC-001: Desk Sprite 系统架构总览与拓扑设计
 
+> 实机适配说明（2026-11-03）：本文硬件选型与引脚为模块化参考方案。当前 USB 小电视以 [SPEC-005](005-connected-device-system-specification.md)、[SPEC-007](007-board-hardware-validation.md)及[板级清单](../docs/hardware/2026-11-03-usb-inspection/board-profile.json)为准；显示需 Mode3；S3原理图TP_KEY直连GPIO5，适用原生电容测量，可靠交互及手势未验收。GPIO4已用于音频输出，不可沿用下文TTP223/GPIO4参考方案。
+
 - **版本**: 1.4.0 (深度闭环版)
 - **状态**: 待复审
 - **更新日期**: 2026-11-02

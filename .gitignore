@@ -45,3 +45,7 @@ cloud/deploy/mosquitto/certs/
 *.csr
 *.crt
 
+# Vendor reference materials (>100MB)
+1.54寸TFT/
+时钟/
+

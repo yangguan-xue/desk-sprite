@@ -1,0 +1,68 @@
+{
+  "public_sha256": "edb6872b0d6794ad5209cefbe7c53a3f606eb9145691a5a3bb41bc4c13ba3ae7",
+  "local_sha256": "b80ab84c9d62ac119ca38e395f23266bfceb542859599597e012ecbd661645a6",
+  "regions": [
+    {
+      "region": "boot",
+      "same": true,
+      "public_sha256": "bd07629e302b1d891276490c6405fc8d832a89432fe363daeabab576c6d2c513",
+      "local_sha256": "bd07629e302b1d891276490c6405fc8d832a89432fe363daeabab576c6d2c513"
+    },
+    {
+      "region": "partitions",
+      "same": true,
+      "public_sha256": "c798c1173b1d0175c33f06340268885c4385ff5129206d90bda416ad99ea8ddd",
+      "local_sha256": "c798c1173b1d0175c33f06340268885c4385ff5129206d90bda416ad99ea8ddd"
+    },
+    {
+      "region": "nvs",
+      "same": true,
+      "public_sha256": "1f55ffcddc1fce4d4ab43d09da1f8e58730a19bf3aadd78331c3eaaa8b9b4410",
+      "local_sha256": "1f55ffcddc1fce4d4ab43d09da1f8e58730a19bf3aadd78331c3eaaa8b9b4410"
+    },
+    {
+      "region": "otadata",
+      "same": true,
+      "public_sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0",
+      "local_sha256": "f94c5d786a7a8fab06ac5d10e33bf37711a6697636dc037559ea19cc410a17f0"
+    },
+    {
+      "region": "app",
+      "same": false,
+      "public_sha256": "a08ee84d5c4cbad914314604df71bd2ff052fdca64309bd52e03282f73da6617",
+      "local_sha256": "d8a17353f7be390fdd3b77bdf612a63e71a0f295fd320170ca37a54adfaae94d"
+    },
+    {
+      "region": "resources",
+      "same": true,
+      "public_sha256": "a1c373a3265318764fce2aea477d303f4412415e9e9462bbdcc91c49db45e956",
+      "local_sha256": "a1c373a3265318764fce2aea477d303f4412415e9e9462bbdcc91c49db45e956"
+    }
+  ],
+  "different_bytes": 69,
+  "difference_ranges": [
+    {
+      "start": "0x11157",
+      "end_inclusive": "0x1115c"
+    },
+    {
+      "start": "0x1115e",
+      "end_inclusive": "0x11164"
+    },
+    {
+      "start": "0x11166",
+      "end_inclusive": "0x11170"
+    },
+    {
+      "start": "0x11172",
+      "end_inclusive": "0x1117d"
+    },
+    {
+      "start": "0x15fd5f",
+      "end_inclusive": "0x15fd7f"
+    }
+  ],
+  "labels_region_only_before_checksum": true,
+  "interpretation": "69 bytes differ: 36 label bytes, 1 image XOR checksum byte, 32 appended SHA256 bytes. All other bytes, including driver instructions and pin constants, are identical.",
+  "source_commit": "defb2c83986de0bf88b826a716f0d0415315d2f4"
+}

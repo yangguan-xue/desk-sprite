@@ -1,0 +1,27 @@
+Create a finished 16-POSE DESKTOP PET ACTION REFERENCE SHEET using the attached approved character model sheet as the strict visual source. The user has approved this exact character. Preserve her identity precisely: long softly wavy pastel cherry-blossom pink hair with the same bangs and little side braid, warm brown eyes, ivory long-sleeved collared blouse with small pale sage bow, high-waisted pale sage green pleated skirt, white calf-length socks and beige loafers. Same sweet wholesome fully clothed character, matching face, outfit and soft pink/sage/ivory colors. Charming fine pixel-art Japanese desktop companion, about 3 heads tall, same proportions in ALL 16 drawings. Use clean readable stepped contours and intentional pixel shading, warm brown outlines, no blur, no 3D, no painterly rendering. Match the attached approved art closely instead of redesigning her.
+
+ONE landscape image containing an EXACT regular FOUR-COLUMN by FOUR-ROW GRID, 16 equally sized cells, read left to right, top to bottom. No large hero drawing, no turnarounds, no collage, no blank cells, no merged cells. Very pale warm ivory flat background. Thin soft peach separator lines, generous safe margins inside every cell. Each cell has one complete full-body character pose, all hair, hands, props and shoes entirely inside its cell, with a small English pixel-style uppercase caption centered at the bottom. All standing characters share a consistent scale. Sitting poses keep the same body proportions. Emphasize clear differing silhouette and expression, suitable for later adaptation to 128x128 sprite animation. This is an ACTION DESIGN SHEET with one KEY POSE per action; not consecutive animation frames. No motion blur or duplicate ghost limbs. No long descriptions or UI elements. No title eating into the grid.
+
+EXACT CELL CONTENTS AND CAPTIONS:
+ROW 1:
+1 IDLE: relaxed front-facing stance, hands gently clasped, soft smile.
+2 WALK: three-quarter side-view mid-step walking toward the right, one arm forward, hair gently trailing.
+3 WAVE: friendly open-hand wave at shoulder height, bright smile.
+4 THINK: one fingertip against chin, head tilted slightly, thoughtful gaze, tiny question mark.
+ROW 2:
+5 CODE: holding and looking at a small sage laptop, focused eyes, laptop resting naturally on her hands.
+6 MEETING: listening attentively, one hand near ear, other holding a tiny notebook, closed mouth, quiet expression.
+7 NOTICE: gently pointing at one small envelope beside her, friendly notification expression, not alarmed.
+8 ALERT: surprised wide eyes and open mouth, hands raised near chest, one small amber exclamation mark.
+ROW 3:
+9 CHEER: happy closed smiling eyes, both arms raised, one bent leg, a tiny star.
+10 SAD: lowered gaze, shoulders slightly drooped, hands together, a small downturned mouth, tender understated expression.
+11 SLEEP: seated curled comfortably with eyes closed and hands in lap, hair pooling softly beside her, tiny Z.
+12 WAKE: standing just after waking, one hand rubbing an eye, the other arm gently raised, sleepy yawn.
+ROW 4:
+13 STRETCH: standing with both arms overhead stretching, eyes gently shut, feet planted.
+14 TEA: holding a small cream teacup with both hands near chest, peaceful smile, one simple wisp of steam.
+15 PAT: reacting to an invisible user's head pat, leaning head down slightly, eyes closed with a delighted smile and light blush, no external hand visible, tiny heart.
+16 GOODBYE: slight polite bow, hands held together in front, soft smile and gently closed eyes.
+
+The drawing must keep all SIXTEEN cells clear and evenly distributed. Captions must be exactly the short labels above. No additional characters, no alternate hairstyles, no cat ears, no costume changes. Highly consistent, polished professional pixel-character action sheet.

@@ -1,0 +1,18 @@
+{
+  "captured_at": "2026-11-03T13:59:51.107542+08:00",
+  "serial_port": "/dev/cu.usbmodem11201",
+  "devices": [
+    {
+      "USB Product Name": "USB JTAG_serial debug unit",
+      "USB Vendor Name": "Espressif",
+      "idVendor": 12346,
+      "idProduct": 4097,
+      "USB Serial Number": "D8:3B:DA:4A:E9:84",
+      "locationID": 17956864,
+      "UsbLinkSpeed": 12000000,
+      "UsbPowerSinkAllocation": 500,
+      "bcdUSB": 512
+    }
+  ],
+  "note": "USB allocation is not measured device current. esptool flash_id reads chip/flash identity and resets the running application; no flash write or erase."
+}
