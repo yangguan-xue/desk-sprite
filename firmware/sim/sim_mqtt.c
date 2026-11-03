@@ -1,4 +1,5 @@
 #include "sim_mqtt.h"
+#include "action_reporter.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +43,16 @@ static long long json_get_int64(const char* json, const char* key, long long def
     return atoll(pos);
 }
 
+static double json_get_double(const char* json, const char* key, double default_val) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    const char* pos = strstr(json, pattern);
+    if (!pos) return default_val;
+    pos += strlen(pattern);
+    while (*pos == ' ' || *pos == '\t' || *pos == '\r' || *pos == '\n') pos++;
+    return atof(pos);
+}
+
 void sim_mqtt_handle_message(const char* topic, const char* payload) {
     if (!payload) return;
 
@@ -53,7 +64,10 @@ void sim_mqtt_handle_message(const char* topic, const char* payload) {
             json_get_string(payload, "event_id", alert.event_id, sizeof(alert.event_id));
             json_get_string(payload, "title", alert.title, sizeof(alert.title));
             json_get_string(payload, "summary", alert.summary, sizeof(alert.summary));
-            json_get_string(payload, "action_url", alert.action_url, sizeof(alert.action_url));
+            json_get_string(payload, "target_url", alert.action_url, sizeof(alert.action_url));
+            if (alert.action_url[0] == '\0') {
+                json_get_string(payload, "url", alert.action_url, sizeof(alert.action_url));
+            }
 
             char prio_str[16] = {0};
             json_get_string(payload, "priority", prio_str, sizeof(prio_str));
@@ -103,7 +117,53 @@ void sim_mqtt_handle_message(const char* topic, const char* payload) {
             memset(&metrics, 0, sizeof(metrics));
             metrics.ttl_sec = (int)json_get_int64(payload, "ttl_sec", 3600);
             metrics.sampled_at = json_get_int64(payload, "sampled_at", (long long)time(NULL));
-            // 简单解析 3 个默认 slot
+
+            // 解析 data.bars 数组 (R09 核心修复)
+            const char* bars_pos = strstr(payload, "\"bars\":");
+            if (bars_pos) {
+                const char* arr_start = strchr(bars_pos, '[');
+                const char* arr_end = arr_start ? strchr(arr_start, ']') : NULL;
+                if (arr_start && arr_end) {
+                    const char* cur = arr_start;
+                    while (cur < arr_end && metrics.item_count < 3) {
+                        const char* obj_start = strchr(cur, '{');
+                        if (!obj_start || obj_start > arr_end) break;
+                        const char* obj_end = strchr(obj_start, '}');
+                        if (!obj_end || obj_end > arr_end) break;
+
+                        size_t obj_len = (size_t)(obj_end - obj_start + 1);
+                        char obj_buf[512];
+                        if (obj_len < sizeof(obj_buf)) {
+                            memcpy(obj_buf, obj_start, obj_len);
+                            obj_buf[obj_len] = '\0';
+
+                            metric_item_t* item = &metrics.items[metrics.item_count];
+                            json_get_string(obj_buf, "id", item->key, sizeof(item->key));
+                            json_get_string(obj_buf, "label", item->label, sizeof(item->label));
+                            item->current = json_get_double(obj_buf, "current", 0.0);
+                            item->total = json_get_double(obj_buf, "limit", 100.0);
+                            json_get_string(obj_buf, "unit", item->unit, sizeof(item->unit));
+                            item->percent = (int)json_get_int64(obj_buf, "percent", 0);
+
+                            char dir_str[16] = {0};
+                            json_get_string(obj_buf, "direction", dir_str, sizeof(dir_str));
+                            item->direction = (strcmp(dir_str, "remaining") == 0) ? METRIC_DIR_REMAINING : METRIC_DIR_USED;
+
+                            char status_str[16] = {0};
+                            json_get_string(obj_buf, "status", status_str, sizeof(status_str));
+                            if (strcmp(status_str, "stale") == 0) item->status = METRIC_STATUS_EXHAUSTED;
+                            else if (strcmp(status_str, "warning") == 0) item->status = METRIC_STATUS_WARNING;
+                            else item->status = METRIC_STATUS_NORMAL;
+
+                            item->sampled_at = json_get_int64(obj_buf, "sampled_at", metrics.sampled_at);
+                            item->ttl_sec = (int)json_get_int64(obj_buf, "ttl_sec", metrics.ttl_sec);
+
+                            metrics.item_count++;
+                        }
+                        cur = obj_end + 1;
+                    }
+                }
+            }
             g_config.on_metrics(&metrics);
         }
     }
@@ -149,14 +209,12 @@ int sim_mqtt_init(const sim_mqtt_config_t* config) {
     printf("[Sim MQTT] Subscribed to %s\n", sub_topic);
 #else
     printf("[Sim MQTT] Initialized in headless/standalone mode for %s\n",
-           config->device_id ? config->device_id : "default");
+           config->device_id ? config->device_id : "unknown");
 #endif
-
     return 0;
 }
 
 int sim_mqtt_loop(int timeout_ms) {
-    if (!g_initialized) return -1;
 #ifdef HAS_MOSQUITTO
     if (g_mosq) {
         return mosquitto_loop(g_mosq, timeout_ms, 1);
@@ -173,14 +231,9 @@ int sim_mqtt_publish_action(const device_action_t* action) {
     snprintf(topic, sizeof(topic), "sprite/device/%s/up/action", action->device_id);
 
     char payload[512];
-    snprintf(payload, sizeof(payload),
-             "{\"type\":\"device_action\",\"version\":1,\"device_id\":\"%s\",\"action_id\":\"%s\","
-             "\"action_type\":\"%s\",\"active_event_id\":%s%s%s,\"timestamp\":%lld}",
-             action->device_id, action->action_id, action->action_type,
-             action->active_event_id[0] ? "\"" : "",
-             action->active_event_id[0] ? action->active_event_id : "null",
-             action->active_event_id[0] ? "\"" : "",
-             action->timestamp);
+    if (action_reporter_serialize_json(action, payload, sizeof(payload)) != 0) {
+        return -1;
+    }
 
 #ifdef HAS_MOSQUITTO
     if (g_mosq) {
@@ -214,10 +267,11 @@ int sim_mqtt_publish_status(const char* status_str) {
 void sim_mqtt_destroy(void) {
 #ifdef HAS_MOSQUITTO
     if (g_mosq) {
+        mosquitto_disconnect(g_mosq);
         mosquitto_destroy(g_mosq);
         g_mosq = NULL;
-        mosquitto_lib_cleanup();
     }
+    mosquitto_lib_cleanup();
 #endif
     g_initialized = false;
 }

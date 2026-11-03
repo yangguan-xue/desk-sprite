@@ -10,17 +10,24 @@ int ui_metrics_compute_render_model(
     if (!payload || !out_model) return -1;
 
     memset(out_model, 0, sizeof(ui_metrics_render_model_t));
-
-    long long age = current_time - payload->sampled_at;
-    bool is_stale = (age > payload->ttl_sec) || (age < 0);
-    out_model->is_stale = is_stale;
     out_model->count = payload->item_count > 3 ? 3 : payload->item_count;
+
+    bool has_any_stale = false;
 
     for (int i = 0; i < out_model->count; i++) {
         const metric_item_t* src = &payload->items[i];
         ui_metric_row_render_t* dst = &out_model->rows[i];
 
-        dst->style = is_stale ? UI_METRIC_STYLE_STALE : UI_METRIC_STYLE_FRESH;
+        long long item_sampled = src->sampled_at > 0 ? src->sampled_at : payload->sampled_at;
+        int item_ttl = src->ttl_sec > 0 ? src->ttl_sec : payload->ttl_sec;
+        long long age = current_time - item_sampled;
+
+        bool row_stale = (item_ttl > 0 && age > item_ttl) || (src->status == METRIC_STATUS_EXHAUSTED) || (age < 0);
+        if (row_stale) {
+            has_any_stale = true;
+        }
+
+        dst->style = row_stale ? UI_METRIC_STYLE_STALE : UI_METRIC_STYLE_FRESH;
         dst->show_mock_badge = src->is_mock;
         dst->delta_color = src->delta_direction;
 
@@ -38,7 +45,7 @@ int ui_metrics_compute_render_model(
         dst->progress_ratio = ratio;
 
         // 格式化文本
-        if (is_stale) {
+        if (row_stale) {
             snprintf(dst->rendered_text, sizeof(dst->rendered_text),
                      "%s: %.0f/%.0f %s [STALE]",
                      src->label[0] ? src->label : src->key,
@@ -52,6 +59,7 @@ int ui_metrics_compute_render_model(
         }
     }
 
+    out_model->is_stale = has_any_stale;
     return 0;
 }
 

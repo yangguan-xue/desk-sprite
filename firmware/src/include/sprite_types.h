@@ -80,17 +80,20 @@ typedef enum {
     METRIC_STATUS_EXHAUSTED = 2
 } metric_status_t;
 
-// 单条度量数据项
+// 单条度量数据项 (SPEC-002 第 3.1 节, R09)
 typedef struct {
     char key[32];
     char label[32];
     double current;
     double total;
     char unit[16];
+    int percent;
     metric_direction_t direction;
     metric_status_t status;
     bool is_mock;
     int delta_direction; // -1: 降低, 0: 持平, 1: 升高
+    long long sampled_at;
+    int ttl_sec;
 } metric_item_t;
 
 // 额度看板载荷
@@ -101,15 +104,19 @@ typedef struct {
     long long sampled_at;
 } metrics_payload_t;
 
-// 设备上报动作
+// 设备上报动作 (SPEC-002 第 3.4 节, R05)
 typedef struct {
     char type[16];          // "device_action"
     int version;            // 1
     char device_id[32];
-    char action_id[36];     // "act_" + hex/timestamp
-    char action_type[16];   // "tap", "long_press", "double_tap"
-    char active_event_id[36];
-    long long timestamp;
+    char action_id[64];     // UUIDv4 (36 chars + \0)
+    char action[16];        // "tap", "long_press", "double_tap"
+    char action_type[16];   // 别名兼容
+    char active_alert_id[36]; // 活跃告警 ID (如 evt_...)
+    char active_event_id[36]; // 别名兼容
+    long long created_at;
+    long long expire_at;    // 严格等于 created_at + 10
+    long long timestamp;    // 兼容时间戳
 } device_action_t;
 
 #ifdef __cplusplus

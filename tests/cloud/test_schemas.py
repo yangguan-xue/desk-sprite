@@ -308,3 +308,33 @@ def test_field_length_and_boundary_constraints():
             },
         })
     assert "expire_at" in str(exc.value)
+
+
+def test_firmware_c_device_action_serialization_contract():
+    """验证 firmware C 语言 action_reporter 实际序列化的 JSON 符合 DeviceActionPayload 契约 (R05)"""
+    import json
+
+    c_serialized_with_alert = (
+        '{"type":"device_action","version":1,"device_id":"esp32_c049ef",'
+        '"action_id":"550e8400-e29b-41d4-a716-446655440000","created_at":1793614860,"expire_at":1793614870,'
+        '"data":{"action":"tap","active_alert_id":"evt_gh_20261102_001"}}'
+    )
+    payload1 = DeviceActionPayload.model_validate_json(c_serialized_with_alert)
+    assert payload1.type == "device_action"
+    assert payload1.action_id == "550e8400-e29b-41d4-a716-446655440000"
+    assert payload1.device_id == "esp32_c049ef"
+    assert payload1.created_at == 1793614860
+    assert payload1.expire_at == 1793614870
+    assert payload1.data.action == DeviceActionType.TAP
+    assert payload1.data.active_alert_id == "evt_gh_20261102_001"
+
+    c_serialized_null_alert = (
+        '{"type":"device_action","version":1,"device_id":"esp32_c049ef",'
+        '"action_id":"a1b2c3d4-e5f6-47a8-b9c0-123456789abc","created_at":1793614900,"expire_at":1793614910,'
+        '"data":{"action":"long_press","active_alert_id":null}}'
+    )
+    payload2 = DeviceActionPayload.model_validate_json(c_serialized_null_alert)
+    assert payload2.type == "device_action"
+    assert payload2.data.action == DeviceActionType.LONG_PRESS
+    assert payload2.data.active_alert_id is None
+

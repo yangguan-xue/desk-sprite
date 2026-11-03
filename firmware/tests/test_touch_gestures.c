@@ -64,23 +64,28 @@ static void test_action_reporter_payload_serialization() {
     assert(strcmp(act.type, "device_action") == 0);
     assert(act.version == 1);
     assert(strcmp(act.device_id, "esp32_c049ef") == 0);
-    assert(strcmp(act.action_type, "tap") == 0);
-    assert(strcmp(act.active_event_id, "evt_abc_123") == 0);
+    assert(strcmp(act.action, "tap") == 0);
+    assert(act.created_at == 1700000000);
+    assert(act.expire_at == 1700000010);
+    assert(strlen(act.action_id) == 36);
+    assert(strcmp(act.active_alert_id, "evt_abc_123") == 0);
 
     char json_buf[512];
     rc = action_reporter_serialize_json(&act, json_buf, sizeof(json_buf));
     assert(rc == 0);
     assert(strstr(json_buf, "\"device_id\":\"esp32_c049ef\"") != NULL);
-    assert(strstr(json_buf, "\"action_type\":\"tap\"") != NULL);
-    assert(strstr(json_buf, "\"active_event_id\":\"evt_abc_123\"") != NULL);
+    assert(strstr(json_buf, "\"action\":\"tap\"") != NULL);
+    assert(strstr(json_buf, "\"created_at\":1700000000") != NULL);
+    assert(strstr(json_buf, "\"expire_at\":1700000010") != NULL);
+    assert(strstr(json_buf, "\"active_alert_id\":\"evt_abc_123\"") != NULL);
 
     // 测试无活跃告警时的 NULL 格式
     rc = action_reporter_build_action("esp32_c049ef", GESTURE_LONG_PRESS, NULL, 1700000000, &act);
     assert(rc == 0);
     rc = action_reporter_serialize_json(&act, json_buf, sizeof(json_buf));
     assert(rc == 0);
-    assert(strstr(json_buf, "\"action_type\":\"long_press\"") != NULL);
-    assert(strstr(json_buf, "\"active_event_id\":null") != NULL);
+    assert(strstr(json_buf, "\"action\":\"long_press\"") != NULL);
+    assert(strstr(json_buf, "\"active_alert_id\":null") != NULL);
 
     printf("[PASS] test_action_reporter_payload_serialization\n");
 }
