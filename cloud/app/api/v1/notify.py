@@ -65,9 +65,13 @@ async def notify(
             content={"code": 42201, "message": f"Invalid enum or malformed URL: {err_str}", "data": None},
         )
 
-    # 3. API Key 鉴权与越权拦截 (401 / 403 / 404)
+    # 3. API Key 鉴权与越权拦截 (401 / 403 / 404, 含 R02 跨宿主校验)
     try:
-        profile = auth_service.verify_request(authorization, req_data.target_device)
+        profile = auth_service.verify_request(
+            authorization,
+            req_data.target_device,
+            target_host=req_data.target_host,
+        )
     except AuthError as ae:
         return JSONResponse(
             status_code=ae.http_status,

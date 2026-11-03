@@ -19,6 +19,7 @@ from starlette.testclient import TestClient
 from cli.sprite.commands.run import run_wrapper
 from cli.sprite.daemon.command_executor import CommandExecutor
 from cloud.app.main import create_app
+from cloud.app.services.auth import create_test_auth_service
 from cloud.app.services.action_router import ActionRouter
 from cloud.app.services.event_store import EventRecord, EventStore
 from shared.enums import CommandAckStatus, EventRecordState, Priority, WorkMode
@@ -78,7 +79,7 @@ def test_boundary_1_cross_device_spoofing():
 def test_boundary_2_idempotency_conflict():
     """边界 2: 相同 Idempotency-Key 提交不同内容，返回 HTTP 409 Conflict"""
     store = EventStore()
-    app = create_app(event_store=store)
+    app = create_app(auth_service=create_test_auth_service(), event_store=store)
     client = TestClient(app)
 
     headers = {

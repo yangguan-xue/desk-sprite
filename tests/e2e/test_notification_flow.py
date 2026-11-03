@@ -11,6 +11,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from cloud.app.main import create_app
+from cloud.app.services.auth import create_test_auth_service
 from cloud.app.services.event_store import EventStore
 from shared.enums import Priority, Sound, PetAction, WorkMode
 
@@ -19,7 +20,7 @@ from shared.enums import Priority, Sound, PetAction, WorkMode
 def e2e_cloud():
     """初始化端到端云端应用实例与事件存储"""
     store = EventStore()
-    app = create_app(event_store=store)
+    app = create_app(auth_service=create_test_auth_service(), event_store=store)
 
     published = []
     mock_mqtt = MagicMock()

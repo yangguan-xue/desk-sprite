@@ -26,7 +26,7 @@ async def github_webhook(
     x_github_event: Optional[str] = Header("pull_request", alias="X-GitHub-Event"),
 ):
     raw_body = await request.body()
-    webhook_secret = getattr(request.app.state, "github_webhook_secret", "test_webhook_secret")
+    webhook_secret = getattr(request.app.state, "github_webhook_secret", None)
     event_store = request.app.state.event_store
     mqtt_service = getattr(request.app.state, "mqtt_service", None)
 

@@ -146,7 +146,14 @@ class ActionRouter:
             params=HostCommandParams(url=record.target_url),
         )
 
-        # 10. 派发下行 MQTT
+        # 10. 派发下行 MQTT (防空宿主误派发)
+        if not record.target_host:
+            return ActionRouteResult(
+                status="target_host_missing",
+                command=None,
+                target_host="",
+            )
+
         target_topic = f"sprite/host/{record.target_host}/down/command"
         if self.mqtt_publisher:
             self.mqtt_publisher(target_topic, command.model_dump_json(), 1)

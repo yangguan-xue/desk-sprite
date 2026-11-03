@@ -128,3 +128,19 @@ def test_github_webhook_workflow_run(client, app_and_store):
     )
     assert response.status_code == 200
     assert response.json()["code"] == 0
+
+
+def test_github_webhook_unconfigured_secret_rejected():
+    """R01 验证: 默认未配置 GITHUB_WEBHOOK_SECRET 的应用绝不接受公开签名"""
+    unconfigured_app = create_app(webhook_secret=None)
+    client = TestClient(unconfigured_app)
+    body = b'{"action": "opened"}'
+    sig = _sign(body, "test_webhook_secret")
+    response = client.post(
+        "/api/v1/webhook/github",
+        content=body,
+        headers={"X-Hub-Signature-256": sig},
+    )
+    assert response.status_code == 401
+    assert response.json()["code"] == 40101
+
