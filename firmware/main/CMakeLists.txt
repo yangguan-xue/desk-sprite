@@ -11,6 +11,7 @@ idf_component_register(
         "../src/engine/action_reporter.c"
         "../src/engine/touch_action.c"
         "../src/engine/mqtt_reassembler.c"
+        "../src/engine/device_config.c"
         "../src/hal/touch_button.c"
     INCLUDE_DIRS
         "."

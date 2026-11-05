@@ -8,6 +8,8 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
+#include "nvs.h"
+#include "device_config.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -32,25 +34,9 @@
 
 static const char *TAG = "SPRITE_MAIN";
 
-// 可配置宏定义 (支持 menuconfig / Kconfig.projbuild / NVS 覆盖)
-#ifndef CONFIG_SPRITE_WIFI_SSID
-#define CONFIG_SPRITE_WIFI_SSID "myssid"
-#endif
-
-#ifndef CONFIG_SPRITE_WIFI_PASSWORD
-#define CONFIG_SPRITE_WIFI_PASSWORD "mypassword"
-#endif
-
+// Non-secret build settings; credentials are provisioned only in NVS.
 #ifndef CONFIG_SPRITE_MQTT_BROKER_URL
 #define CONFIG_SPRITE_MQTT_BROKER_URL "mqtt://127.0.0.1:1883"
-#endif
-
-#ifndef CONFIG_SPRITE_MQTT_USERNAME
-#define CONFIG_SPRITE_MQTT_USERNAME ""
-#endif
-
-#ifndef CONFIG_SPRITE_MQTT_PASSWORD
-#define CONFIG_SPRITE_MQTT_PASSWORD ""
 #endif
 
 #ifndef CONFIG_SPRITE_DEVICE_ID
@@ -75,6 +61,20 @@ static long long s_mute_until_sec = 0;
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_mqtt_connected = false;
 static bool s_wifi_connected = false;
+static bool s_mqtt_started = false;
+static device_config_t s_device_config;
+
+static bool read_nvs_config(void *ctx, const char *key, char *out, size_t capacity) {
+    return nvs_get_str(*(nvs_handle_t *)ctx, key, out, &capacity) == ESP_OK;
+}
+
+static bool load_device_config(void) {
+    nvs_handle_t handle;
+    if (nvs_open("sprite", NVS_READONLY, &handle) != ESP_OK) return false;
+    bool loaded = device_config_load(&s_device_config, read_nvs_config, &handle);
+    nvs_close(handle);
+    return loaded;
+}
 
 static metrics_payload_t s_last_metrics;
 static ui_metrics_render_model_t s_metrics_model;
@@ -305,7 +305,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     (void)arg;
     (void)event_data;
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        ESP_LOGI(TAG, "Wi-Fi started, connecting to %s...", CONFIG_SPRITE_WIFI_SSID);
+        ESP_LOGI(TAG, "Wi-Fi started, connecting to provisioned network...");
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         s_wifi_connected = false;
@@ -320,10 +320,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
         // 启动 SNTP 同步真实 Unix 时间戳 (R4-03)
         sync_time_via_sntp();
 
-        // 启动 MQTT 客户端
-        if (s_mqtt_client) {
-            esp_mqtt_client_start(s_mqtt_client);
-        }
+        // SNTP callback starts MQTT only after certificate validity can be checked.
     }
 }
 
@@ -331,6 +328,9 @@ static void time_sync_notification_cb(struct timeval *tv) {
     (void)tv;
     sntp_sync_tracker_notify_synced(&s_time_sync_tracker);
     ESP_LOGI(TAG, "SNTP synchronized successfully, system time is now calibrated");
+    if (s_mqtt_client && !s_mqtt_started) {
+        s_mqtt_started = (esp_mqtt_client_start(s_mqtt_client) == ESP_OK);
+    }
 }
 
 static void sync_time_via_sntp(void) {
@@ -375,11 +375,12 @@ static void wifi_init_sta(void) {
                                                         NULL));
 
     wifi_config_t wifi_config = {0};
-    strncpy((char*)wifi_config.sta.ssid, CONFIG_SPRITE_WIFI_SSID, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char*)wifi_config.sta.password, CONFIG_SPRITE_WIFI_PASSWORD, sizeof(wifi_config.sta.password) - 1);
+    memcpy(wifi_config.sta.ssid, s_device_config.wifi_ssid, strlen(s_device_config.wifi_ssid));
+    memcpy(wifi_config.sta.password, s_device_config.wifi_password, strlen(s_device_config.wifi_password));
     wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_LOGI(TAG, "Wi-Fi STA mode initialized.");
@@ -416,6 +417,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             s_mqtt_connected = false;
             mqtt_reassembler_reset(&s_mqtt_reassembler);
             ESP_LOGW(TAG, "MQTT Disconnected");
+            break;
+        case MQTT_EVENT_SUBSCRIBED:
+            ESP_LOGI(TAG, "MQTT subscription acknowledged (msg_id=%d)", event->msg_id);
+            break;
+        case MQTT_EVENT_ERROR:
+            if (event->error_handle) {
+                ESP_LOGE(TAG, "MQTT error type=%d TLS=%d stack=%d verify=%d",
+                         event->error_handle->error_type,
+                         event->error_handle->esp_tls_last_esp_err,
+                         event->error_handle->esp_tls_stack_err,
+                         event->error_handle->esp_tls_cert_verify_flags);
+            }
             break;
         case MQTT_EVENT_DATA: {
             const char *full_topic = NULL;
@@ -532,12 +545,8 @@ static void mqtt_app_start(void) {
     // 严禁关闭服务端验证，严格校验主机名与证书有效性 (R5-01)
     mqtt_cfg.broker.verification.skip_cert_common_name_check = false;
 
-    if (strlen(CONFIG_SPRITE_MQTT_USERNAME) > 0) {
-        mqtt_cfg.credentials.username = CONFIG_SPRITE_MQTT_USERNAME;
-    }
-    if (strlen(CONFIG_SPRITE_MQTT_PASSWORD) > 0) {
-        mqtt_cfg.credentials.authentication.password = CONFIG_SPRITE_MQTT_PASSWORD;
-    }
+    mqtt_cfg.credentials.username = s_device_config.mqtt_username;
+    mqtt_cfg.credentials.authentication.password = s_device_config.mqtt_password;
 
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     esp_mqtt_client_register_event(s_mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
@@ -630,6 +639,7 @@ static void touch_poll_task(void *pvParameters) {
 // ============================================================================
 
 static void render_screen_st7789(const alert_payload_t *active_alert, time_t now_sec) {
+    static char last_rendered_event[64];
     // 1. 顶部状态栏 (y: 0..23)
     bsp_st7789_fill_rect(0, 0, LCD_WIDTH, 24, COLOR_RGB565_BG_DARK);
 
@@ -733,6 +743,12 @@ static void render_screen_st7789(const alert_payload_t *active_alert, time_t now
             bsp_st7789_draw_string(14, y_pos + 5, row->rendered_text, text_col, text_bg);
         }
     }
+    if (active_alert && strcmp(last_rendered_event, active_alert->event_id)) {
+        snprintf(last_rendered_event, sizeof(last_rendered_event), "%s", active_alert->event_id);
+        ESP_LOGI(TAG, "Alert rendered event_id=%s", active_alert->event_id);
+    } else if (!active_alert) {
+        last_rendered_event[0] = '\0';
+    }
 }
 
 // UI 渲染与告警视听调度任务 (50ms 周期)
@@ -767,6 +783,7 @@ static void ui_and_alert_task(void *pvParameters) {
                 }
                 if (!mute) {
                     bsp_es8311_play_tone(880, 250); // 880Hz 清脆提示音
+                    ESP_LOGI(TAG, "Alert tone completed event_id=%s", active->event_id);
                 }
             }
         } else {
@@ -782,11 +799,8 @@ void app_main(void) {
 
     // 1. 初始化 NVS 存储
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
     ESP_ERROR_CHECK(ret);
+    bool config_ready = load_device_config();
 
     // 2. 初始化板级硬件外设 (按已核验引脚 board-profile.json)
     bsp_st7789_init();
@@ -805,8 +819,12 @@ void app_main(void) {
     bsp_es8311_play_tone(880, 150);
 
     // 4. 启动网络与 MQTT 协议栈 (R4-01)
-    wifi_init_sta();
-    mqtt_app_start();
+    if (config_ready) {
+        mqtt_app_start();
+        wifi_init_sta();
+    } else {
+        ESP_LOGE(TAG, "Missing or invalid sprite NVS configuration; network disabled");
+    }
 
     ESP_LOGI(TAG, "Desk Sprite ESP32-S3 firmware initialized successfully.");
 

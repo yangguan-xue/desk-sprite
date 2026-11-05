@@ -1,0 +1,5 @@
+# Non-secret settings for SPEC-009 Tencent Cloud physical-device acceptance.
+CONFIG_SPRITE_MQTT_BROKER_URL="mqtts://voice-code.yangguanxue.top:8883"
+CONFIG_SPRITE_SNTP_SERVER="ntp.tencent.com"
+CONFIG_SPRITE_DEVICE_ID="esp32_c049ef"
+# CONFIG_SPRITE_ENABLE_TOUCH_ACTIONS is not set
