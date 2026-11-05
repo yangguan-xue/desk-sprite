@@ -38,6 +38,10 @@ token.json
 firmware/build/
 firmware/sdkconfig
 firmware/sdkconfig.old
+tools/video_probe/managed_components/
+tools/video_probe/sdkconfig
+tools/video_probe/sdkconfig.old
+tools/video_probe/build/
 firmware/sim/desk_sprite_sim
 
 # Certificates
