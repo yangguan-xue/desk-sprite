@@ -29,4 +29,6 @@ desk-sprite/
 
 当前 USB 小电视的实测硬件、固件状态与待验收功能，见 [SPEC-005：USB 小电视系统规格说明书](specs/005-connected-device-system-specification.md)。
 
+腾讯云服务的安装、健康检查、凭据管理与回滚，见[云端部署说明](cloud/deploy/README.md)；本次实际部署结果见[2026-11-05 部署记录](docs/deployments/2026-11-05-tencent-cloud.md)。
+
 显示 SPI Mode3 与 ES8311 提示音已实机核验；四边粗框及底部四色带已获照片确认。[卖家S3资料核对](docs/hardware/2026-11-03-usb-inspection/seller-materials-review.md)补齐GPIO5原生触摸、GPIO15录音、背光低有效电路；触摸交互及USB长期稳定性尚未通过。当前设备运行 Kimi 看板，仓库产品固件需先按[板级核验结果](docs/hardware/2026-11-03-usb-inspection/board-validation.md)与[引脚清单](docs/hardware/2026-11-03-usb-inspection/board-profile.json)适配。独立诊断说明见 [RAM 板级诊断工具](tools/board_probe/README.md)。
