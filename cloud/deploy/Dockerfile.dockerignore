@@ -1,0 +1,9 @@
+**
+!cloud/
+!cloud/requirements.txt
+!cloud/app/
+!cloud/app/**
+!shared/
+!shared/**
+**/__pycache__/
+**/*.pyc

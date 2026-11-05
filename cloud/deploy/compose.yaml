@@ -1,0 +1,52 @@
+name: desk-sprite
+services:
+  broker:
+    image: eclipse-mosquitto:2.0.22
+    user: "1883:1883"
+    restart: unless-stopped
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./mosquitto/production.conf:/mosquitto/config/mosquitto.conf:ro
+      - /opt/desk-sprite/runtime/acl.conf:/mosquitto/config/acl.conf:ro
+      - /opt/desk-sprite/runtime/password.txt:/mosquitto/config/password.txt:ro
+      - /opt/desk-sprite/runtime/certs:/mosquitto/config/certs:ro
+      - broker-data:/mosquitto/data
+    mem_limit: 96m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+  api:
+    image: desk-sprite-cloud:trial
+    build:
+      context: ../..
+      dockerfile: cloud/deploy/Dockerfile
+    restart: unless-stopped
+    depends_on: [broker]
+    env_file: /opt/desk-sprite/runtime/cloud.env
+    environment:
+      MQTT_HOST: broker
+      MQTT_PORT: "1883"
+      MQTT_TLS_ENABLED: "false"
+      MQTT_AUTO_CONNECT: "true"
+    ports:
+      - "127.0.0.1:8200:8000"
+    mem_limit: 256m
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test: [CMD, python, -c, "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)); assert d['data']['mqtt_connected'] is True"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+volumes:
+  broker-data:
