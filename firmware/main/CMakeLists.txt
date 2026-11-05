@@ -5,6 +5,7 @@ idf_component_register(
         "hal/es8311.c"
         "hal/ttp223.c"
         "../src/ui/ui_layout.c"
+        "../src/ui/ui_sakura.c"
         "../src/ui/ui_metrics.c"
         "../src/engine/alert_filter.c"
         "../src/engine/alert_queue.c"

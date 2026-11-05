@@ -25,6 +25,7 @@
 #include "sprite_types.h"
 #include "ui_layout.h"
 #include "ui_metrics.h"
+#include "ui_sakura.h"
 #include "alert_filter.h"
 #include "alert_queue.h"
 #include "touch_button.h"
@@ -56,7 +57,7 @@ static const char *TAG = "SPRITE_MAIN";
 static alert_scheduler_t s_alert_sched;
 static touch_button_state_t s_touch_button;
 static work_mode_t s_current_mode = WORK_MODE_IDLE;
-static ui_metric_view_mode_t s_metric_view_mode = UI_METRIC_VIEW_VALUE;
+static ui_metric_view_mode_t s_metric_view_mode = UI_METRIC_VIEW_PERCENT;
 static long long s_mute_until_sec = 0;
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_mqtt_connected = false;
@@ -638,111 +639,34 @@ static void touch_poll_task(void *pvParameters) {
 // ST7789 UI 渲染任务 (R4-04: 将共享状态与指标真实绘制上屏)
 // ============================================================================
 
+static void flush_sakura_lcd(void *ctx, int y, int height, const uint16_t *pixels) {
+    (void)ctx;
+    static uint16_t __attribute__((aligned(4))) wire_pixels[SAKURA_BUFFER_PIXELS];
+    for (int i = 0; i < SAKURA_WIDTH * height; i++) {
+        wire_pixels[i] = (uint16_t)((pixels[i] >> 8) | (pixels[i] << 8));
+    }
+    bsp_st7789_draw_bitmap(0, y, SAKURA_WIDTH, y + height, wire_pixels);
+}
+
 static void render_screen_st7789(const alert_payload_t *active_alert, time_t now_sec) {
     static char last_rendered_event[64];
-    // 1. 顶部状态栏 (y: 0..23)
-    bsp_st7789_fill_rect(0, 0, LCD_WIDTH, 24, COLOR_RGB565_BG_DARK);
-
-    // 状态指示圆点
-    uint16_t dot_color = COLOR_RGB565_GRAY;
-    const char *mode_tag = "IDLE";
-    if (s_current_mode == WORK_MODE_CODING) {
-        dot_color = COLOR_RGB565_GREEN;
-        mode_tag = "CODING";
-    } else if (s_current_mode == WORK_MODE_MEETING) {
-        dot_color = COLOR_RGB565_DARKORANGE;
-        mode_tag = "MEETING";
-    } else if (s_current_mode == WORK_MODE_SLEEP) {
-        dot_color = COLOR_RGB565_GRAY;
-        mode_tag = "SLEEP";
+    static uint16_t strip[SAKURA_BUFFER_PIXELS];
+    char clock_text[8] = "--:--";
+    struct tm local;
+    if (now_sec > 1700000000 && localtime_r(&now_sec, &local)) {
+        strftime(clock_text, sizeof(clock_text), "%H:%M", &local);
     }
-
-    bsp_st7789_fill_rect(16, 8, 12, 12, dot_color);
-    bsp_st7789_draw_string(36, 8, mode_tag, COLOR_RGB565_GRAY, COLOR_RGB565_BG_DARK);
-
-    // Wi-Fi / MQTT 在线状态
-    if (s_mqtt_connected) {
-        bsp_st7789_draw_string(105, 8, "[OK]", COLOR_RGB565_GREEN, COLOR_RGB565_BG_DARK);
-    } else if (s_wifi_connected) {
-        bsp_st7789_draw_string(105, 8, "[WIFI]", COLOR_RGB565_YELLOW, COLOR_RGB565_BG_DARK);
-    } else {
-        bsp_st7789_draw_string(105, 8, "[OFF]", COLOR_RGB565_RED, COLOR_RGB565_BG_DARK);
-    }
-
-    // 静音标志
-    if (now_sec < s_mute_until_sec) {
-        bsp_st7789_draw_string(155, 8, "[MUTE]", COLOR_RGB565_YELLOW, COLOR_RGB565_BG_DARK);
-    }
-
-    // 2. 舞台区域 (y: 24..167)
-    if (active_alert) {
-        // 告警弹窗覆盖层 (RR08, R4-04: 渲染标题、摘要、倒计时与手动确认)
-        uint16_t alert_bg = (active_alert->priority == PRIORITY_HIGH) ? COLOR_RGB565_DARKRED : COLOR_RGB565_DARKORANGE;
-        bsp_st7789_fill_rect(12, 30, 216, 132, alert_bg);
-
-        // 绘制标题
-        bsp_st7789_draw_string(20, 38, active_alert->title, COLOR_RGB565_WHITE, alert_bg);
-
-        // 绘制摘要 (最多两行，自动换行)
-        bsp_st7789_draw_string_wrapped(20, 52, 200, 24, active_alert->summary, COLOR_RGB565_WHITE, alert_bg);
-
-        // 倒计时与交互提示 (R3-07, R4-04)
-        if (active_alert->priority == PRIORITY_HIGH) {
-            // High 优先级必须手动确认，不显倒计时
-            bsp_st7789_draw_string(20, 78, "Action: Manual Ack Required", COLOR_RGB565_WHITE, alert_bg);
-        } else {
-            // Medium 优先级显示调度器剩余展示时长
-            char cd_buf[32];
-            int rem_sec = alert_scheduler_get_remaining_sec(&s_alert_sched);
-            if (rem_sec < 0) rem_sec = 0;
-            snprintf(cd_buf, sizeof(cd_buf), "Duration: %ds", rem_sec);
-            bsp_st7789_draw_string(20, 78, cd_buf, COLOR_RGB565_GRAY, alert_bg);
-        }
-
-        // 底部按键提示
-        bsp_st7789_draw_string(20, 142, "Tap:Open | Hold:Dismiss", COLOR_RGB565_WHITE, alert_bg);
-    } else {
-        // 正常待机/工作状态桌面宠物动画区
-        bsp_st7789_fill_rect(0, 24, LCD_WIDTH, 144, COLOR_RGB565_BLACK);
-        bsp_st7789_fill_rect(56, 32, 128, 128, COLOR_RGB565_DARKGRAY);
-        bsp_st7789_draw_string(90, 88, "( ^_^ )", COLOR_RGB565_WHITE, COLOR_RGB565_DARKGRAY);
-    }
-
-    // 3. 底部三行度量指标看板 (y: 168..239, R4-04: 将 s_metrics_model 渲染至屏幕)
-    bsp_st7789_fill_rect(0, 168, LCD_WIDTH, 72, COLOR_RGB565_BG_DARK);
-
-    for (int i = 0; i < 3; i++) {
-        int y_pos = 172 + i * 23;
-        // 进度条轨道背景
-        bsp_st7789_fill_rect(10, y_pos, 220, 18, COLOR_RGB565_DARKGRAY);
-
-        if (i < s_metrics_model.count) {
-            const ui_metric_row_render_t* row = &s_metrics_model.rows[i];
-            int bar_w = (int)(row->progress_ratio * 220.0f);
-            if (bar_w > 220) bar_w = 220;
-            if (bar_w < 0) bar_w = 0;
-
-            uint16_t bar_color;
-            if (row->style == UI_METRIC_STYLE_STALE) {
-                bar_color = COLOR_RGB565_GRAY; // Stale 灰显
-            } else if (i == 0) {
-                bar_color = COLOR_RGB565_GREEN;
-            } else if (i == 1) {
-                bar_color = COLOR_RGB565_BLUE;
-            } else {
-                bar_color = COLOR_RGB565_PURPLE;
-            }
-
-            if (bar_w > 0) {
-                bsp_st7789_fill_rect(10, y_pos, bar_w, 18, bar_color);
-            }
-
-            // 绘制指标文本 (包含 UTF-8 中文与单位 ¥/天)
-            uint16_t text_col = (row->style == UI_METRIC_STYLE_STALE) ? COLOR_RGB565_GRAY : COLOR_RGB565_WHITE;
-            uint16_t text_bg = (bar_w > 10) ? bar_color : COLOR_RGB565_DARKGRAY;
-            bsp_st7789_draw_string(14, y_pos + 5, row->rendered_text, text_col, text_bg);
-        }
-    }
+    sakura_scene_t scene = {
+        .mode = s_current_mode, .clock = clock_text,
+        .wifi = s_wifi_connected, .mqtt = s_mqtt_connected,
+        .muted = now_sec < s_mute_until_sec || s_current_mode == WORK_MODE_MEETING,
+        .touch_enabled = CONFIG_SPRITE_ENABLE_TOUCH_ACTIONS,
+        .show_value = s_metric_view_mode == UI_METRIC_VIEW_VALUE,
+        .elapsed_ms = (uint32_t)(esp_timer_get_time() / 1000), .now = now_sec,
+        .metrics = s_has_metrics ? &s_last_metrics : NULL, .alert = active_alert,
+        .alert_remaining_sec = alert_scheduler_get_remaining_sec(&s_alert_sched),
+    };
+    ui_sakura_render(&scene, strip, flush_sakura_lcd, NULL);
     if (active_alert && strcmp(last_rendered_event, active_alert->event_id)) {
         snprintf(last_rendered_event, sizeof(last_rendered_event), "%s", active_alert->event_id);
         ESP_LOGI(TAG, "Alert rendered event_id=%s", active_alert->event_id);
@@ -755,6 +679,7 @@ static void render_screen_st7789(const alert_payload_t *active_alert, time_t now
 static void ui_and_alert_task(void *pvParameters) {
     (void)pvParameters;
     time_t last_tick_sec = 0;
+    int64_t last_frame_ms = -125;
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -768,11 +693,14 @@ static void ui_and_alert_task(void *pvParameters) {
                 ui_metrics_compute_render_model_ex(&s_last_metrics, (long long)now_sec, s_metric_view_mode, &s_metrics_model);
             }
 
-            const alert_payload_t* active = alert_scheduler_get_active(&s_alert_sched);
-            render_screen_st7789(active, now_sec);
         }
 
         const alert_payload_t* active = alert_scheduler_get_active(&s_alert_sched);
+        int64_t now_ms = esp_timer_get_time() / 1000;
+        if (now_ms - last_frame_ms >= 125) {
+            render_screen_st7789(active, now_sec);
+            last_frame_ms = now_ms - ((now_ms - last_frame_ms) % 125);
+        }
         if (active) {
             // 新到达告警触发清脆提示音 (物理 ES8311 视听联动闭环)
             if (strcmp(s_last_played_event_id, active->event_id) != 0) {

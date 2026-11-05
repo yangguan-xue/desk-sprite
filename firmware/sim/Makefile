@@ -1,7 +1,7 @@
 CC ?= gcc
-CFLAGS ?= -Wall -Wextra -std=c99 -I../src/include -I.
+CFLAGS ?= -Wall -Wextra -std=c99 -D_DEFAULT_SOURCE -I../src/include -I.
 
-SRC = main.c sim_audio.c sim_mqtt.c ../src/ui/ui_layout.c ../src/ui/ui_metrics.c ../src/engine/alert_filter.c ../src/engine/alert_queue.c ../src/engine/action_reporter.c ../src/hal/touch_button.c
+SRC = main.c sim_audio.c sim_mqtt.c ../src/ui/ui_layout.c ../src/ui/ui_sakura.c ../src/ui/ui_metrics.c ../src/engine/alert_filter.c ../src/engine/alert_queue.c ../src/engine/action_reporter.c ../src/hal/touch_button.c
 TARGET = desk_sprite_sim
 
 # 检测是否有 SDL2

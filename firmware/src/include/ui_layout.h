@@ -10,10 +10,12 @@ extern "C" {
 #define SCREEN_WIDTH 240
 #define SCREEN_HEIGHT 240
 
-#define STATUS_BAR_HEIGHT 24
-#define STAGE_HEIGHT 144
-#define METRICS_BAR_HEIGHT 72
-#define METRIC_ROW_HEIGHT 24
+/* Sakura room: header, room, speech, single quota footer. */
+#define STATUS_BAR_HEIGHT 38
+#define STAGE_HEIGHT 147
+#define SPEECH_BAR_HEIGHT 34
+#define METRICS_BAR_HEIGHT 21
+#define METRIC_ROW_HEIGHT 21
 
 typedef struct {
     bool wifi_connected;
