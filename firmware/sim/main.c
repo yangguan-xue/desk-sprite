@@ -8,6 +8,7 @@
 #include "sprite_types.h"
 #include "ui_layout.h"
 #include "ui_metrics.h"
+#include "ui_sakura.h"
 #include "alert_filter.h"
 #include "alert_queue.h"
 #include "action_reporter.h"
@@ -17,64 +18,18 @@
 
 #ifdef HAS_SDL2
 #include <SDL.h>
-#include "font_utf8.h"
-
-static void sim_draw_glyph(SDL_Renderer* renderer, int x, int y, uint32_t cp, SDL_Color color, int scale) {
-    const uint8_t* glyph = sim_get_glyph(cp);
-    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
-    for (int row = 0; row < 8; row++) {
-        uint8_t bits = glyph[row];
-        for (int col = 0; col < 8; col++) {
-            if (bits & (1 << col)) {
-                if (scale == 1) {
-                    SDL_RenderDrawPoint(renderer, x + col, y + row);
-                } else {
-                    SDL_Rect pixel = {x + col * scale, y + row * scale, scale, scale};
-                    SDL_RenderFillRect(renderer, &pixel);
-                }
-            }
-        }
-    }
+static void flush_sakura_sdl(void *ctx, int y, int height, const uint16_t *pixels) {
+    SDL_Texture *texture = ctx;
+    SDL_Rect area = {0, y, SAKURA_WIDTH, height};
+    SDL_UpdateTexture(texture, &area, pixels, SAKURA_WIDTH * sizeof(uint16_t));
 }
 
-static void sim_draw_string_wrapped(SDL_Renderer* renderer, int x, int y, int max_w, int max_h, const char* str, SDL_Color color, int scale) {
-    if (!str) return;
-    int cur_x = x;
-    int cur_y = y;
-    int line_height = 10 * scale;
-    int char_w = 8 * scale;
-
-    const char* ptr = str;
-    while (*ptr) {
-        if (*ptr == '\n') {
-            cur_x = x;
-            cur_y += line_height;
-            if (cur_y + 8 * scale > y + max_h) break;
-            ptr++;
-            continue;
-        }
-        if (cur_x + char_w > x + max_w) {
-            // 自动换行 (R3-05)
-            cur_x = x;
-            cur_y += line_height;
-            if (cur_y + 8 * scale > y + max_h) break;
-        }
-        uint32_t cp = utf8_next_codepoint(&ptr);
-        if (cp == 0) break;
-        sim_draw_glyph(renderer, cur_x, cur_y, cp, color, scale);
-        cur_x += char_w;
-    }
-}
-
-static void sim_draw_string(SDL_Renderer* renderer, int x, int y, const char* str, SDL_Color color, int scale) {
-    sim_draw_string_wrapped(renderer, x, y, 240 - x - 4, 240 - y, str, color, scale);
-}
 #endif
 
 static volatile bool g_running = true;
 static alert_scheduler_t g_alert_sched;
 static work_mode_t g_current_mode = WORK_MODE_IDLE;
-static ui_metric_view_mode_t g_metric_view_mode = UI_METRIC_VIEW_VALUE;
+static ui_metric_view_mode_t g_metric_view_mode = UI_METRIC_VIEW_PERCENT;
 static long long g_mute_until_sec = 0;
 static touch_button_state_t g_touch_button;
 
@@ -193,41 +148,22 @@ int main(int argc, char* argv[]) {
     alert_scheduler_init(&g_alert_sched);
     touch_button_init(&g_touch_button);
 
-    // 默认初始看板数据 (Copilot 18/30 60% remaining, RR07)
+    // Real sessions wait for MQTT. Explicit standalone previews carry a mock badge.
     memset(&g_last_metrics, 0, sizeof(g_last_metrics));
-    g_last_metrics.item_count = 3;
-    g_last_metrics.ttl_sec = 3600;
-    g_last_metrics.sampled_at = (long long)time(NULL);
-
-    strncpy(g_last_metrics.items[0].key, "kimi_token", sizeof(g_last_metrics.items[0].key));
-    strncpy(g_last_metrics.items[0].label, "Kimi 5H", sizeof(g_last_metrics.items[0].label));
-    g_last_metrics.items[0].current = 42000.0;
-    g_last_metrics.items[0].total = 100000.0;
-    strncpy(g_last_metrics.items[0].unit, "tok", sizeof(g_last_metrics.items[0].unit));
-    g_last_metrics.items[0].direction = METRIC_DIR_USED;
-    g_last_metrics.items[0].status = METRIC_STATUS_NORMAL;
-    g_last_metrics.items[0].is_mock = false;
-
-    strncpy(g_last_metrics.items[1].key, "deepseek_cost", sizeof(g_last_metrics.items[1].key));
-    strncpy(g_last_metrics.items[1].label, "DeepSeek", sizeof(g_last_metrics.items[1].label));
-    g_last_metrics.items[1].current = 28.5;
-    g_last_metrics.items[1].total = 100.0;
-    strncpy(g_last_metrics.items[1].unit, "¥", sizeof(g_last_metrics.items[1].unit));
-    g_last_metrics.items[1].direction = METRIC_DIR_USED;
-    g_last_metrics.items[1].status = METRIC_STATUS_NORMAL;
-    g_last_metrics.items[1].is_mock = false;
-
-    strncpy(g_last_metrics.items[2].key, "copilot_sub", sizeof(g_last_metrics.items[2].key));
-    strncpy(g_last_metrics.items[2].label, "Copilot", sizeof(g_last_metrics.items[2].label));
-    g_last_metrics.items[2].current = 18.0;
-    g_last_metrics.items[2].total = 30.0;
-    strncpy(g_last_metrics.items[2].unit, "天", sizeof(g_last_metrics.items[2].unit));
-    g_last_metrics.items[2].direction = METRIC_DIR_REMAINING;
-    g_last_metrics.items[2].status = METRIC_STATUS_NORMAL;
-    g_last_metrics.items[2].is_mock = true;
-
-    ui_metrics_compute_render_model_ex(&g_last_metrics, (long long)time(NULL), g_metric_view_mode, &g_metrics_render_model);
-    g_has_metrics = true;
+    if (standalone) {
+        g_last_metrics.item_count = 1;
+        g_last_metrics.sampled_at = (long long)time(NULL);
+        g_last_metrics.ttl_sec = 3600;
+        metric_item_t *demo = &g_last_metrics.items[0];
+        snprintf(demo->key, sizeof(demo->key), "quota");
+        snprintf(demo->label, sizeof(demo->label), "Remaining");
+        demo->current = 68;
+        demo->total = 100;
+        demo->direction = METRIC_DIR_REMAINING;
+        demo->is_mock = true;
+        g_has_metrics = true;
+        ui_metrics_compute_render_model_ex(&g_last_metrics, (long long)time(NULL), g_metric_view_mode, &g_metrics_render_model);
+    }
 
     if (!standalone) {
         sim_mqtt_config_t mqtt_cfg = {
@@ -262,6 +198,9 @@ int main(int argc, char* argv[]) {
 #ifdef HAS_SDL2
     SDL_Window* window = NULL;
     SDL_Renderer* renderer = NULL;
+    SDL_Texture* texture = NULL;
+    uint16_t strip[SAKURA_BUFFER_PIXELS];
+    uint32_t last_frame = 0;
 
     if (!headless) {
         if (SDL_Init(SDL_INIT_VIDEO) < 0) {
@@ -273,7 +212,14 @@ int main(int argc, char* argv[]) {
                 SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                 240, 240, SDL_WINDOW_SHOWN
             );
-            renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+            if (window) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+            if (!renderer && window) renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+            if (renderer) texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGB565,
+                SDL_TEXTUREACCESS_STREAMING, SAKURA_WIDTH, SAKURA_HEIGHT);
+            if (!texture) {
+                fprintf(stderr, "SDL display unavailable: %s\n", SDL_GetError());
+                headless = true;
+            }
         }
     }
 #else
@@ -378,123 +324,27 @@ int main(int argc, char* argv[]) {
             }
 
             // 绘制基础背景
-            SDL_SetRenderDrawColor(renderer, 18, 18, 22, 255);
-            SDL_RenderClear(renderer);
-
-            // 1. 顶部状态栏 (高度 24px)
-            SDL_SetRenderDrawColor(renderer, 28, 30, 38, 255);
-            SDL_Rect top_bar = {0, 0, 240, 24};
-            SDL_RenderFillRect(renderer, &top_bar);
-
-            // Wi-Fi 信号指示灯 (绿色)
-            SDL_SetRenderDrawColor(renderer, 16, 185, 129, 255);
-            SDL_Rect wifi_dot = {8, 8, 8, 8};
-            SDL_RenderFillRect(renderer, &wifi_dot);
-
-            // 模式指示灯与文字: IDLE 绿, CODING 蓝, MEETING 黄, SLEEP 灰 (RR08)
-            const char* mode_tag = "IDLE";
-            if (g_current_mode == WORK_MODE_CODING) {
-                SDL_SetRenderDrawColor(renderer, 59, 130, 246, 255);
-                mode_tag = "CODING";
-            } else if (g_current_mode == WORK_MODE_MEETING) {
-                SDL_SetRenderDrawColor(renderer, 245, 158, 11, 255);
-                mode_tag = "MEETING";
-            } else if (g_current_mode == WORK_MODE_SLEEP) {
-                SDL_SetRenderDrawColor(renderer, 107, 114, 128, 255);
-                mode_tag = "SLEEP";
-            } else {
-                SDL_SetRenderDrawColor(renderer, 16, 185, 129, 255);
-                mode_tag = "IDLE";
+            uint32_t frame_ms = SDL_GetTicks();
+            if (frame_ms - last_frame >= 125 || last_frame == 0) {
+                char clock_text[8] = "--:--";
+                time_t clock_now = (time_t)now;
+                struct tm *local = localtime(&clock_now);
+                if (now > 1700000000 && local) strftime(clock_text, sizeof(clock_text), "%H:%M", local);
+                sakura_scene_t scene = {
+                    .mode = g_current_mode, .clock = clock_text,
+                    .wifi = sim_mqtt_is_connected(), .mqtt = sim_mqtt_is_connected(),
+                    .muted = now < g_mute_until_sec || g_current_mode == WORK_MODE_MEETING,
+                    .touch_enabled = true,
+                    .show_value = g_metric_view_mode == UI_METRIC_VIEW_VALUE,
+                    .elapsed_ms = frame_ms, .now = now,
+                    .metrics = g_has_metrics ? &g_last_metrics : NULL, .alert = active_alert,
+                    .alert_remaining_sec = alert_scheduler_get_remaining_sec(&g_alert_sched),
+                };
+                ui_sakura_render(&scene, strip, flush_sakura_sdl, texture);
+                SDL_RenderClear(renderer);
+                SDL_RenderCopy(renderer, texture, NULL, NULL);
+                last_frame = frame_ms - ((frame_ms - last_frame) % 125);
             }
-            SDL_Rect mode_dot = {22, 8, 8, 8};
-            SDL_RenderFillRect(renderer, &mode_dot);
-
-            SDL_Color white_color = {255, 255, 255, 255};
-            SDL_Color gray_color = {156, 163, 175, 255};
-            sim_draw_string(renderer, 36, 8, mode_tag, gray_color, 1);
-
-            if (now < g_mute_until_sec) {
-                SDL_Color yellow_col = {245, 158, 11, 255};
-                sim_draw_string(renderer, 150, 8, "[MUTE]", yellow_col, 1);
-            }
-
-            // 2. 舞台区域 (y: 24~167)
-            if (active_alert) {
-                // 告警弹窗覆盖层 (RR08: 实际渲染可读文本、倒计时与优先级)
-                if (active_alert->priority == PRIORITY_HIGH) {
-                    SDL_SetRenderDrawColor(renderer, 185, 28, 28, 255); // 深红
-                } else {
-                    SDL_SetRenderDrawColor(renderer, 180, 83, 9, 255); // 深橙
-                }
-                SDL_Rect alert_box = {12, 30, 216, 132};
-                SDL_RenderFillRect(renderer, &alert_box);
-
-                // 绘制标题
-                sim_draw_string(renderer, 20, 38, active_alert->title, white_color, 1);
-
-                // 绘制摘要 (最多两行，自动换行, R3-05)
-                sim_draw_string_wrapped(renderer, 20, 52, 200, 24, active_alert->summary, white_color, 1);
-
-                // 绘制倒计时与交互提示 (R3-07, SPEC-003 第 3 节)
-                if (active_alert->priority == PRIORITY_HIGH) {
-                    // High 优先级必须手动确认，无倒计时自动关闭
-                    sim_draw_string(renderer, 20, 78, "Action: Manual Ack Required", white_color, 1);
-                } else {
-                    // Medium 优先级显示调度器剩余展示时长 (duration_sec 倒计时)
-                    char cd_buf[32];
-                    int rem_sec = alert_scheduler_get_remaining_sec(&g_alert_sched);
-                    if (rem_sec < 0) rem_sec = 0;
-                    snprintf(cd_buf, sizeof(cd_buf), "Duration: %ds", rem_sec);
-                    sim_draw_string(renderer, 20, 78, cd_buf, gray_color, 1);
-                }
-
-                // 交互提示栏
-                sim_draw_string(renderer, 20, 142, "Tap:Open | Hold:Dismiss", white_color, 1);
-            } else {
-                // 正常桌宠动画区
-                SDL_SetRenderDrawColor(renderer, 30, 32, 42, 255);
-                SDL_Rect pet_box = {56, 32, 128, 128};
-                SDL_RenderFillRect(renderer, &pet_box);
-                SDL_SetRenderDrawColor(renderer, 99, 102, 241, 255);
-                SDL_RenderDrawRect(renderer, &pet_box);
-                sim_draw_string(renderer, 90, 88, "( ^_^ )", white_color, 1);
-            }
-
-            // 3. 底部三行度量指标看板 (y: 168~239, RR07, RR08 完整文本、比例与 [M]/[STALE] 标记)
-            SDL_SetRenderDrawColor(renderer, 26, 28, 35, 255);
-            SDL_Rect metrics_bg = {0, 168, 240, 72};
-            SDL_RenderFillRect(renderer, &metrics_bg);
-
-            for (int i = 0; i < 3; i++) {
-                int y_pos = 172 + i * 23;
-                SDL_SetRenderDrawColor(renderer, 48, 52, 65, 255);
-                SDL_Rect r_track = {10, y_pos, 220, 18};
-                SDL_RenderFillRect(renderer, &r_track);
-
-                if (i < g_metrics_render_model.count) {
-                    const ui_metric_row_render_t* row = &g_metrics_render_model.rows[i];
-                    int bar_w = (int)(row->progress_ratio * 220.0f);
-                    if (bar_w > 220) bar_w = 220;
-                    if (bar_w < 0) bar_w = 0;
-
-                    if (row->style == UI_METRIC_STYLE_STALE) {
-                        SDL_SetRenderDrawColor(renderer, 107, 114, 128, 180); // Stale 灰显
-                    } else if (i == 0) {
-                        SDL_SetRenderDrawColor(renderer, 16, 185, 129, 200); // 绿色
-                    } else if (i == 1) {
-                        SDL_SetRenderDrawColor(renderer, 59, 130, 246, 200); // 蓝色
-                    } else {
-                        SDL_SetRenderDrawColor(renderer, 168, 85, 247, 200); // 紫色
-                    }
-                    SDL_Rect r_bar = {10, y_pos, bar_w, 18};
-                    SDL_RenderFillRect(renderer, &r_bar);
-
-                    // 绘制指标文本 (RR08)
-                    SDL_Color text_col = (row->style == UI_METRIC_STYLE_STALE) ? gray_color : white_color;
-                    sim_draw_string(renderer, 14, y_pos + 5, row->rendered_text, text_col, 1);
-                }
-            }
-
             SDL_RenderPresent(renderer);
         }
 #endif
@@ -513,6 +363,7 @@ int main(int argc, char* argv[]) {
     }
 
 #ifdef HAS_SDL2
+    if (texture) SDL_DestroyTexture(texture);
     if (renderer) SDL_DestroyRenderer(renderer);
     if (window) SDL_DestroyWindow(window);
     SDL_Quit();

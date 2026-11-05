@@ -484,3 +484,13 @@ flowchart TD
        - 排队期间向设备同步 `meeting`，出队弹窗时验证功放 `PA_EN = 0` 强制硬件静音。
 - **可执行验证命令**:
   - `pytest tests/e2e/test_security_and_edge_cases.py -v`
+
+
+### TASK-021: 樱花汽水共享像素页面
+- **输入**: SPEC-003 第 2 节与已确认粉白预览。
+- **交付物**: 共享 RGB565 条带渲染器、原角色与清晰字库生成脚本、ESP32/SDL2 接入、独立离屏导出工具及边界测试。
+- **技术约束**: 原角色不重画；剩余额度不绑定厂商；不伪造实时数据；告警优先级与数值切换保持；无完整帧缓冲依赖。
+- **验证**: `python tools/test_sakura_ui.py --cc cc`（需 C99 编译器；Pillow 可选，用于生成 PNG/GIF）；`make -C firmware/sim test_build`；`idf.py -C firmware build`（需 ESP-IDF 环境）。
+- **验收**: idle/focus/meeting/night/cheer/high-alert 可导出；used/remaining、过期、mock、无数据、非法数值和长 UTF-8 消息有边界覆盖。实机显示另行验收。
+
+- **验证记录（2026-11-05）**: WSL GCC 严格警告 + ASan/UBSan 通过；10 种状态离屏导出通过；SDL2 dummy 驱动实际渲染通过；原额度、告警调度、触摸动作、LCD 缓冲同步回归通过。当前无 ESP-IDF 环境，完整固件编译及实机显示待验收；未烧录。
