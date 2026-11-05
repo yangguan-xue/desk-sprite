@@ -1,7 +1,7 @@
 # TASK-023：腾讯云试部署与消息验收
 
 - 输入：[SPEC-008](../specs/008-tencent-cloud-deployment.md)、现有 cloud/ 实现、SSH 主机 `tencent-118`。
-- 状态：云端已部署，消息与安全验收通过；公网 MQTT 8883 连通待放行确认。
+- 状态：已完成。云端已部署，用户放行 TCP 8883 后，Mac 公网 HTTPS/MQTT TLS 消息、安全与幂等验收全部通过；实物 ESP32 联调另行验证。
 - 交付物：Dockerfile、锁定直接依赖的 requirements、Compose 配置、生产 Broker 配置、Nginx 片段、部署说明及真实部署记录。
 
 ## 执行顺序
