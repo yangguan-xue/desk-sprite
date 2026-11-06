@@ -7,6 +7,8 @@
 - **更新日期**: 2026-11-05
 - **关联规范**: [SPEC-001 系统架构](001-system-architecture.md), [SPEC-002 通信协议](002-protocol-and-events.md), [SPEC-004 Mac客户端](004-mac-cli-and-daemon.md)
 
+> 动作系统补充（2026-11-06）：[SPEC-011](011-pet-action-system.md)定义后续角色姿态、动作生命周期、资源预算和验收；尚未实现。等待队列容量统一为当前实现的 5 条，不含当前展示项；本次仅对齐文档。
+
 ---
 
 ## 1. 硬件平台与基准选型依据
@@ -90,7 +92,7 @@ flowchart TD
     IngressCheck -- 当前为 coding / idle 且 (Medium 或 High) --> QueueRouter{队列路由调度}
     
     QueueRouter -- 当前屏幕正在展示 High --> HighAction{新到告警判定}
-    HighAction -- 新到为 Medium --> Enqueue[压入容量为 3 的环形队列等待]
+    HighAction -- 新到为 Medium --> Enqueue[压入容量为 5 的等待队列]
     HighAction -- 新到为同 event_id High --> DropDup[静默丢弃 (幂等)]
     HighAction -- 新到为不同 event_id High --> ReplaceHigh[立即替换当前展示内容, 重置警报]
     

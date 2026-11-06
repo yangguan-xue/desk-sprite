@@ -34,3 +34,5 @@ desk-sprite/
 显示 SPI Mode3 与 ES8311 提示音已实机核验；四边粗框及底部四色带已获照片确认。[卖家S3资料核对](docs/hardware/2026-11-03-usb-inspection/seller-materials-review.md)补齐GPIO5原生触摸、GPIO15录音、背光低有效电路；触摸交互及USB长期稳定性尚未通过。当前设备运行 Kimi 看板，仓库产品固件需先按[板级核验结果](docs/hardware/2026-11-03-usb-inspection/board-validation.md)与[引脚清单](docs/hardware/2026-11-03-usb-inspection/board-profile.json)适配。独立诊断说明见 [RAM 板级诊断工具](tools/board_probe/README.md)。
 
 粉白「樱花汽水」页面已接入固件与 SDL2 模拟器，保留 sakura-green 原角色，使用独立像素字库、通用剩余额度和多状态房间。运行与实际像素预览导出见 [模拟器说明](firmware/sim/README.md)；新页面尚未实机验收。
+
+待机、工作、开心、叹气、警觉、睡眠及会议安静状态的动作、触发和验收规则，见 [SPEC-011：樱花桌宠动作系统](specs/011-pet-action-system.md)；当前为待评审规范。
