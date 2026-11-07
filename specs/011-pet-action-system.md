@@ -4,6 +4,7 @@
 - **状态**：待评审；本次交付规范，尚未实现或完成实机动作验收
 - **日期**：2026-11-06
 - **关联**：[通信协议](002-protocol-and-events.md)、[显示与调度](003-sprite-display-and-state-machine.md)、[实际硬件](005-connected-device-system-specification.md)、[设备云端试运行](009-device-cloud-trial.md)
+- **任务拆分**：[TASK-026](../tasks/026-pet-action-system.md)（2026-11-07，19项待实施任务；不表示代码或实机验收通过）
 
 ## 1. 目标与范围
 

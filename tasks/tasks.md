@@ -5,6 +5,10 @@
 - **依据规范**: [SPEC-001](../specs/001-system-architecture.md) (v1.4.0), [SPEC-002](../specs/002-protocol-and-events.md) (v1.4.0), [SPEC-003](../specs/003-sprite-display-and-state-machine.md) (v1.4.0), [SPEC-004](../specs/004-mac-cli-and-daemon.md) (v1.4.0), [AGENTS.md](../AGENTS.md)
 - **执行原则**: 规范驱动开发 (SDD)、原子化交付、安全第一、闭环验证。
 
+## 后续专项任务
+
+- [TASK-026：樱花桌宠动作系统](026-pet-action-system.md)：对应 SPEC-011，含19项待实施子任务、依赖顺序、验证命令和实机验收检查点（2026-11-07）。
+
 ---
 
 ## 任务依赖全景图 (Dependency Graph)
